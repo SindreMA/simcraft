@@ -135,7 +135,7 @@ pub fn parse_simc_result(raw: &Value) -> Value {
 
 const PAIRED_SLOT_SET: &[&str] = &["finger1", "finger2", "trinket1", "trinket2"];
 
-fn extract_baseline_gear(player: &Value) -> HashMap<String, Value> {
+fn extract_all_gear(player: &Value) -> HashMap<String, Value> {
     let empty = json!({});
     let gear = player.get("gear").unwrap_or(&empty);
     let gear_obj = match gear.as_object() {
@@ -151,10 +151,13 @@ fn extract_baseline_gear(player: &Value) -> HashMap<String, Value> {
 
     let mut baseline: HashMap<String, Value> = HashMap::new();
 
-    for (slot, data) in gear_obj {
-        if !PAIRED_SLOT_SET.contains(&slot.as_str()) {
-            continue;
-        }
+    for (raw_slot, data) in gear_obj {
+        // simc JSON output uses different slot names than simc input
+        let slot = match raw_slot.as_str() {
+            "shoulders" => "shoulder".to_string(),
+            "wrists" => "wrist".to_string(),
+            other => other.to_string(),
+        };
 
         let encoded = data
             .get("encoded_item")
@@ -207,7 +210,7 @@ fn extract_baseline_gear(player: &Value) -> HashMap<String, Value> {
         baseline.insert(
             slot.clone(),
             json!({
-                "slot": slot,
+                "slot": &slot,
                 "item_id": item_id,
                 "ilevel": ilevel,
                 "name": name,
@@ -284,8 +287,11 @@ pub fn parse_top_gear_result(
         .unwrap_or_default();
 
     let baseline_items = if baseline_items.is_empty() {
-        let baseline_gear = extract_baseline_gear(player);
-        baseline_gear.into_values().collect::<Vec<_>>()
+        let all_gear = extract_all_gear(player);
+        ["finger1", "finger2", "trinket1", "trinket2"]
+            .iter()
+            .filter_map(|s| all_gear.get(*s).cloned())
+            .collect::<Vec<_>>()
     } else {
         baseline_items
     };
@@ -303,6 +309,10 @@ pub fn parse_top_gear_result(
         b_dps.partial_cmp(&a_dps).unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // Extract full equipped gear for gear overview
+    let all_gear = extract_all_gear(player);
+    let equipped_gear: serde_json::Map<String, Value> = all_gear.into_iter().collect();
+
     json!({
         "type": "top_gear",
         "base_dps": round1(base_dps),
@@ -313,6 +323,7 @@ pub fn parse_top_gear_result(
             .unwrap_or("Unknown"),
         "simc_version": extract_version(raw),
         "results": results,
+        "equipped_gear": Value::Object(equipped_gear),
     })
 }
 

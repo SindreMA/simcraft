@@ -58,7 +58,7 @@ export default function RootLayout({
             Bugs are not features — but they might sim higher than your gear. Use at your own risk.
             Not affiliated with Blizzard, Raidbots, or anyone who knows what they&apos;re doing.
           </p>
-          <p className="text-center text-[10px] text-gray-700 mt-2">v0.4.0</p>
+          <p className="text-center text-[10px] text-gray-700 mt-2">v0.4.1</p>
         </footer>
       </body>
     </html>

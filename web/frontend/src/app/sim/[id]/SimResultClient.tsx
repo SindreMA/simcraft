@@ -124,12 +124,23 @@ export default function SimResultClient() {
                 ilevel: number;
                 name: string;
                 bonus_ids?: number[];
+                enchant_id?: number;
+                gem_id?: number;
                 is_kept?: boolean;
               }>;
               dps: number;
               delta: number;
             }>
           }
+          equippedGear={r.equipped_gear as Record<string, {
+            slot: string;
+            item_id: number;
+            ilevel: number;
+            name: string;
+            bonus_ids?: number[];
+            enchant_id?: number;
+            gem_id?: number;
+          }>}
         />
       ) : (
         <>

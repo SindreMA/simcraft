@@ -89,14 +89,19 @@ _PAIRED_SLOTS = {
 
 _PAIRED_SLOT_SET = {"finger1", "finger2", "trinket1", "trinket2"}
 
+# simc JSON output uses different slot names than simc input
+_SIMC_JSON_SLOT_MAP = {
+    "shoulders": "shoulder",
+    "wrists": "wrist",
+}
 
-def _extract_baseline_gear(player: dict) -> dict[str, dict]:
-    """Extract equipped item info per slot from simc player gear data."""
+
+def _extract_all_gear(player: dict) -> dict[str, dict]:
+    """Extract equipped item info for ALL slots from simc player gear data."""
     gear = player.get("gear", {})
     baseline: dict[str, dict] = {}
-    for slot, data in gear.items():
-        if slot not in _PAIRED_SLOT_SET:
-            continue
+    for raw_slot, data in gear.items():
+        slot = _SIMC_JSON_SLOT_MAP.get(raw_slot, raw_slot)
         encoded = data.get("encoded_item", "")
         # Parse item_id from encoded_item string
         item_id = 0
@@ -180,8 +185,11 @@ def parse_top_gear_result(
     baseline_items = combo_metadata.get("Currently Equipped", [])
     # If no metadata, fall back to extracting from simc gear data
     if not baseline_items:
-        baseline_gear = _extract_baseline_gear(player)
-        baseline_items = list(baseline_gear.values())
+        all_gear = _extract_all_gear(player)
+        baseline_items = [
+            all_gear[s] for s in ("finger1", "finger2", "trinket1", "trinket2")
+            if s in all_gear
+        ]
 
     results.append({
         "name": "Currently Equipped",
@@ -192,6 +200,9 @@ def parse_top_gear_result(
 
     results.sort(key=lambda r: r["dps"], reverse=True)
 
+    # Extract full equipped gear for the gear overview
+    equipped_gear = _extract_all_gear(player)
+
     return {
         "type": "top_gear",
         "base_dps": round(base_dps, 1),
@@ -201,4 +212,5 @@ def parse_top_gear_result(
         ),
         "simc_version": _extract_version(raw),
         "results": results,
+        "equipped_gear": equipped_gear,
     }

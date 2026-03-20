@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import NavTabs from "./components/NavTabs";
 import SystemInfo from "./components/SystemInfo";
 import "./globals.css";
 
@@ -39,31 +40,20 @@ export default function RootLayout({
               </span>
             </a>
             <SystemInfo />
-            <nav className="flex items-center gap-0.5">
-              <a
-                href="/"
-                className="px-3 py-1.5 text-[13px] text-muted hover:text-white rounded-md transition-colors"
-              >
-                Quick Sim
-              </a>
-              <a
-                href="/top-gear"
-                className="px-3 py-1.5 text-[13px] text-muted hover:text-white rounded-md transition-colors"
-              >
-                Top Gear
-              </a>
+            <div className="flex items-center gap-3">
+              <NavTabs />
               <a
                 href="https://github.com/sortbek/simcraft/releases/latest"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-2 px-3 py-1.5 text-[13px] font-medium text-gold hover:text-white rounded-md transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-[13px] font-medium text-gold hover:text-white rounded-md transition-colors flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M8 12V3M5 9l3 3 3-3M3 14h10" />
                 </svg>
                 Desktop App
               </a>
-            </nav>
+            </div>
           </div>
         </header>
         <main className="max-w-5xl mx-auto px-6 py-10">{children}</main>

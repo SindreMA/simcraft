@@ -1,6 +1,6 @@
 [package]
 name = "simhammer"
-version = "0.2.0"
+version = "0.3.1"
 edition = "2021"
 
 [dependencies]
@@ -19,6 +19,8 @@ tempfile = "3"
 portpicker = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 sysinfo = "0.33"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -3,6 +3,7 @@ import Script from "next/script";
 import DesktopAppLink from "./components/DesktopAppLink";
 import SimTypeCards from "./components/SimTypeCards";
 import SystemInfo from "./components/SystemInfo";
+import UpdateChecker from "./components/UpdateChecker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
+        <UpdateChecker />
         <header className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur-xl">
           <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
             <a href="/" className="flex items-center gap-2 group">

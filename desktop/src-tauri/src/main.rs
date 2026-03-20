@@ -63,6 +63,8 @@ fn main() {
 
             Ok(())
         })
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![get_api_port])
         .run(tauri::generate_context!())
         .expect("Error while running tauri application");

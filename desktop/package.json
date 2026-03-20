@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
+    "build": "node -e \"process.env.TAURI_SIGNING_PRIVATE_KEY=require('fs').readFileSync('updater-key.pem','utf8').trim();process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD='';require('child_process').execSync('npx tauri build',{stdio:'inherit',env:process.env})\"",
     "prebuild:frontend": "npm run --prefix ../web/frontend build:desktop",
     "copy:frontend": "node -e \"const fs=require('fs');const p=require('path');function cp(s,d){fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s)){const sp=p.join(s,f),dp=p.join(d,f);fs.statSync(sp).isDirectory()?cp(sp,dp):fs.copyFileSync(sp,dp)}}cp('../web/frontend/out','src-tauri/resources/frontend')\""
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "cross-env": "^10.1.0"
   }
 }

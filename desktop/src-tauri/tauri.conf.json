@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "productName": "SimHammer",
+  "version": "0.1.0",
+  "identifier": "com.simhammer.app",
+  "build": {
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../../web/frontend/out",
+    "beforeBuildCommand": "npm run --prefix ../web/frontend build",
+    "beforeDevCommand": "npm run --prefix ../web/frontend dev"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "SimHammer",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "resources": {
+      "resources/data/*": "data/",
+      "resources/simc/*": "simc/"
+    }
+  }
+}

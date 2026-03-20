@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import SystemInfo from "./components/SystemInfo";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -37,6 +38,7 @@ export default function RootLayout({
                 SimHammer
               </span>
             </a>
+            <SystemInfo />
             <nav className="flex items-center gap-0.5">
               <a
                 href="/"

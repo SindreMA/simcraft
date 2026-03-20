@@ -1,0 +1,520 @@
+use actix_cors::Cors;
+use actix_web::{web, App, HttpServer, HttpResponse};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use crate::game_data;
+use crate::models::{Job, JobStatus, JobStore};
+use crate::profileset_generator;
+use crate::result_parser;
+use crate::simc_runner;
+use crate::addon_parser;
+
+// ---------- Request / Response types ----------
+
+#[derive(Debug, Deserialize)]
+pub struct SimRequest {
+    pub simc_input: String,
+    #[serde(default = "default_iterations")]
+    pub iterations: u32,
+    #[serde(default = "default_fight_style")]
+    pub fight_style: String,
+    #[serde(default = "default_target_error")]
+    pub target_error: f64,
+    #[serde(default = "default_sim_type")]
+    pub sim_type: String,
+    #[serde(default)]
+    pub max_upgrade: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TopGearRequest {
+    pub simc_input: String,
+    pub selected_items: HashMap<String, Vec<usize>>,
+    pub items_by_slot: Option<HashMap<String, Vec<Value>>>,
+    #[serde(default = "default_iterations")]
+    pub iterations: u32,
+    #[serde(default = "default_fight_style")]
+    pub fight_style: String,
+    #[serde(default = "default_target_error")]
+    pub target_error: f64,
+    #[serde(default)]
+    pub max_upgrade: bool,
+    #[serde(default)]
+    pub copy_enchants: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SimResponse {
+    pub id: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ItemInfoBatchRequest {
+    #[serde(default)]
+    pub items: Vec<Value>,
+    #[serde(default)]
+    pub item_ids: Vec<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BonusIdsQuery {
+    #[serde(default)]
+    pub bonus_ids: String,
+}
+
+fn default_iterations() -> u32 { 1000 }
+fn default_fight_style() -> String { "Patchwerk".to_string() }
+fn default_target_error() -> f64 { 0.1 }
+fn default_sim_type() -> String { "quick".to_string() }
+
+// ---------- Handlers ----------
+
+async fn create_sim(
+    req: web::Json<SimRequest>,
+    store: web::Data<Arc<JobStore>>,
+    simc_path: web::Data<PathBuf>,
+) -> HttpResponse {
+    let simc_input = if req.max_upgrade {
+        game_data::upgrade_simc_input(&req.simc_input)
+    } else {
+        req.simc_input.clone()
+    };
+
+    let job = Job::new(
+        simc_input.clone(),
+        req.sim_type.clone(),
+        req.iterations,
+        req.fight_style.clone(),
+        req.target_error,
+    );
+    let job_id = job.id.clone();
+    let created_at = job.created_at.clone();
+    store.insert(job);
+
+    // Spawn background task
+    let store_clone = store.get_ref().clone();
+    let simc = simc_path.get_ref().clone();
+    let options = json!({
+        "fight_style": req.fight_style,
+        "target_error": req.target_error,
+        "iterations": req.iterations,
+        "sim_type": req.sim_type,
+    });
+    let job_id_clone = job_id.clone();
+
+    tokio::spawn(async move {
+        store_clone.update_status(&job_id_clone, JobStatus::Running);
+        store_clone.update_progress(&job_id_clone, 20, "Simulating", "");
+        match simc_runner::run_simc(&simc, &job_id_clone, &simc_input, &options).await {
+            Ok(raw) => {
+                let parsed = result_parser::parse_simc_result(&raw);
+                let result_str = serde_json::to_string(&parsed).unwrap_or_default();
+                store_clone.set_result(&job_id_clone, result_str);
+            }
+            Err(e) => {
+                store_clone.set_error(&job_id_clone, e);
+            }
+        }
+    });
+
+    HttpResponse::Ok().json(SimResponse {
+        id: job_id,
+        status: "pending".to_string(),
+        created_at,
+    })
+}
+
+async fn create_top_gear_sim(
+    req: web::Json<TopGearRequest>,
+    store: web::Data<Arc<JobStore>>,
+    simc_path: web::Data<PathBuf>,
+) -> HttpResponse {
+    let simc_input = if req.max_upgrade {
+        game_data::upgrade_simc_input(&req.simc_input)
+    } else {
+        req.simc_input.clone()
+    };
+
+    let parsed = addon_parser::parse_addon_string(&simc_input);
+    let base_profile = parsed
+        .get("base_profile")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let mut items_by_slot: HashMap<String, Vec<Value>> = if let Some(ref ibs) = req.items_by_slot {
+        ibs.clone()
+    } else {
+        // Extract from parsed addon string
+        let ibs_val = parsed.get("items_by_slot").cloned().unwrap_or(json!({}));
+        serde_json::from_value(ibs_val).unwrap_or_default()
+    };
+
+    if req.copy_enchants {
+        items_by_slot = game_data::apply_copy_enchants(&items_by_slot);
+    }
+
+    let (generated_input, combo_count, combo_metadata) =
+        match profileset_generator::generate_top_gear_input(
+            &base_profile,
+            &items_by_slot,
+            &req.selected_items,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return HttpResponse::BadRequest().json(json!({"detail": e}));
+            }
+        };
+
+    if combo_count == 0 {
+        return HttpResponse::BadRequest().json(json!({
+            "detail": "No alternative items selected. Select at least one non-equipped item."
+        }));
+    }
+
+    let job = Job::new(
+        generated_input.clone(),
+        "top_gear".to_string(),
+        req.iterations,
+        req.fight_style.clone(),
+        req.target_error,
+    );
+    let job_id = job.id.clone();
+    let created_at = job.created_at.clone();
+
+    // Store combo metadata on the job
+    let meta_json = serde_json::to_string(&json!({
+        "_combo_metadata": combo_metadata,
+        "_combo_count": combo_count,
+    }))
+    .unwrap_or_default();
+
+    let mut job = job;
+    job.combo_metadata_json = Some(meta_json);
+    store.insert(job);
+
+    // Spawn background task
+    let store_clone = store.get_ref().clone();
+    let simc = simc_path.get_ref().clone();
+    let options = json!({
+        "fight_style": req.fight_style,
+        "target_error": req.target_error,
+        "iterations": req.iterations,
+    });
+    let job_id_clone = job_id.clone();
+
+    tokio::spawn(async move {
+        store_clone.update_status(&job_id_clone, JobStatus::Running);
+        let store_progress = store_clone.clone();
+        let store_stages = store_clone.clone();
+        let jid_progress = job_id_clone.clone();
+        let jid_stages = job_id_clone.clone();
+        match simc_runner::run_simc_staged(
+            &simc,
+            &job_id_clone,
+            &generated_input,
+            &options,
+            combo_count,
+            move |pct, stage, detail| {
+                store_progress.update_progress(&jid_progress, pct, stage, detail);
+            },
+            move |summary| {
+                store_stages.complete_stage(&jid_stages, summary);
+            },
+        )
+        .await
+        {
+            Ok(raw) => {
+                // Recover combo_metadata from job
+                let job_snap = store_clone.get(&job_id_clone);
+                let meta: Option<HashMap<String, Vec<Value>>> = job_snap
+                    .as_ref()
+                    .and_then(|j| j.combo_metadata_json.as_ref())
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .and_then(|v| {
+                        v.get("_combo_metadata").cloned()
+                    })
+                    .and_then(|v| serde_json::from_value(v).ok());
+
+                let parsed = result_parser::parse_top_gear_result(&raw, meta.as_ref());
+                let result_str = serde_json::to_string(&parsed).unwrap_or_default();
+                store_clone.set_result(&job_id_clone, result_str);
+            }
+            Err(e) => {
+                store_clone.set_error(&job_id_clone, e);
+            }
+        }
+    });
+
+    HttpResponse::Ok().json(SimResponse {
+        id: job_id,
+        status: "pending".to_string(),
+        created_at,
+    })
+}
+
+async fn get_sim_status(
+    path: web::Path<String>,
+    store: web::Data<Arc<JobStore>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    let status_str = match job.status {
+        JobStatus::Pending => "pending",
+        JobStatus::Running => "running",
+        JobStatus::Done => "done",
+        JobStatus::Failed => "failed",
+    };
+
+    let progress = match job.status {
+        JobStatus::Done => 100,
+        _ => job.progress_pct as i32,
+    };
+
+    let parsed_result: Option<Value> = if job.status == JobStatus::Done {
+        job.result_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+    } else {
+        None
+    };
+
+    HttpResponse::Ok().json(json!({
+        "id": job.id,
+        "status": status_str,
+        "progress": progress,
+        "progress_stage": job.progress_stage,
+        "progress_detail": job.progress_detail,
+        "stages_completed": job.stages_completed,
+        "result": parsed_result,
+        "error": job.error_message,
+    }))
+}
+
+async fn get_sim_raw(
+    path: web::Path<String>,
+    store: web::Data<Arc<JobStore>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    match &job.result_json {
+        Some(result) => match serde_json::from_str::<Value>(result) {
+            Ok(val) => HttpResponse::Ok().json(val),
+            Err(_) => HttpResponse::InternalServerError()
+                .json(json!({"detail": "Failed to parse stored result"})),
+        },
+        None => {
+            HttpResponse::NotFound().json(json!({"detail": "No results available yet"}))
+        }
+    }
+}
+
+async fn get_item_info(
+    path: web::Path<u64>,
+    query: web::Query<BonusIdsQuery>,
+) -> HttpResponse {
+    let item_id = path.into_inner();
+    let bonus_list: Vec<u64> = if query.bonus_ids.is_empty() {
+        Vec::new()
+    } else {
+        query
+            .bonus_ids
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect()
+    };
+
+    let bonus_ref = if bonus_list.is_empty() {
+        None
+    } else {
+        Some(bonus_list.as_slice())
+    };
+
+    let result = game_data::get_item_info(item_id, bonus_ref).unwrap_or_else(|| {
+        json!({
+            "item_id": item_id,
+            "name": format!("Item {}", item_id),
+            "quality": 1,
+            "quality_name": "common",
+            "icon": "inv_misc_questionmark",
+            "ilevel": 0,
+        })
+    });
+
+    HttpResponse::Ok().json(result)
+}
+
+async fn get_item_info_batch(
+    req: web::Json<ItemInfoBatchRequest>,
+) -> HttpResponse {
+    let mut items_list = req.items.clone();
+    if items_list.is_empty() && !req.item_ids.is_empty() {
+        items_list = req
+            .item_ids
+            .iter()
+            .map(|iid| json!({"item_id": iid}))
+            .collect();
+    }
+
+    if items_list.is_empty() || items_list.len() > 100 {
+        return HttpResponse::BadRequest().json(json!({"detail": "Provide 1-100 items"}));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_items: Vec<(u64, Vec<u64>)> = Vec::new();
+
+    for item in &items_list {
+        let iid = item
+            .get("item_id")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let bonus: Vec<u64> = item
+            .get("bonus_ids")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|b| b.as_u64()).collect())
+            .unwrap_or_default();
+        let mut sorted_bonus = bonus.clone();
+        sorted_bonus.sort();
+        let key = format!(
+            "{}:{}",
+            iid,
+            sorted_bonus
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(":")
+        );
+        if seen.insert(key) {
+            unique_items.push((iid, bonus));
+        }
+    }
+
+    let mut results: HashMap<String, Value> = HashMap::new();
+    for (iid, bonus) in &unique_items {
+        let bonus_ref = if bonus.is_empty() {
+            None
+        } else {
+            Some(bonus.as_slice())
+        };
+        let info = game_data::get_item_info(*iid, bonus_ref).unwrap_or_else(|| {
+            json!({
+                "item_id": iid,
+                "name": format!("Item {}", iid),
+                "quality": 1,
+                "quality_name": "common",
+                "icon": "inv_misc_questionmark",
+                "ilevel": 0,
+            })
+        });
+        results.insert(iid.to_string(), info);
+    }
+
+    HttpResponse::Ok().json(results)
+}
+
+async fn get_enchant_info(path: web::Path<u64>) -> HttpResponse {
+    let enchant_id = path.into_inner();
+    let result = game_data::get_enchant_info(enchant_id)
+        .unwrap_or_else(|| json!({"enchant_id": enchant_id, "name": ""}));
+    HttpResponse::Ok().json(result)
+}
+
+async fn get_gem_info(path: web::Path<u64>) -> HttpResponse {
+    let gem_id = path.into_inner();
+    let result = game_data::get_gem_info(gem_id)
+        .unwrap_or_else(|| json!({"gem_id": gem_id, "name": "", "icon": "", "quality": 3}));
+    HttpResponse::Ok().json(result)
+}
+
+async fn get_upgrade_options(query: web::Query<BonusIdsQuery>) -> HttpResponse {
+    let ids: Vec<u64> = query
+        .bonus_ids
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let options = game_data::get_upgrade_options(&ids);
+    match options {
+        Some(opts) => HttpResponse::Ok().json(json!({"options": opts})),
+        None => HttpResponse::Ok().json(json!({"options": []})),
+    }
+}
+
+async fn health_check() -> HttpResponse {
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    HttpResponse::Ok().json(json!({
+        "status": "ok",
+        "threads": threads,
+        "mode": "desktop",
+    }))
+}
+
+/// Start the actix-web HTTP server on a random available port.
+/// Returns the port number.
+pub async fn start(resource_dir: &Path) -> u16 {
+    let port: u16 = 17384;
+
+    let simc_path = if cfg!(windows) {
+        resource_dir.join("simc").join("simc.exe")
+    } else {
+        resource_dir.join("simc").join("simc")
+    };
+    let simc_path_buf: PathBuf = simc_path;
+
+    let job_store = Arc::new(JobStore::new());
+
+    let store_data = web::Data::new(job_store);
+    let simc_data = web::Data::new(simc_path_buf);
+
+    let bind_addr = format!("127.0.0.1:{}", port);
+
+    let server = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .allow_any_method()
+            .allow_any_header()
+            .max_age(3600);
+
+        App::new()
+            .wrap(cors)
+            .app_data(store_data.clone())
+            .app_data(simc_data.clone())
+            .route("/api/sim", web::post().to(create_sim))
+            .route("/api/top-gear/sim", web::post().to(create_top_gear_sim))
+            .route("/api/sim/{id}", web::get().to(get_sim_status))
+            .route("/api/sim/{id}/raw", web::get().to(get_sim_raw))
+            .route("/api/item-info/{id}", web::get().to(get_item_info))
+            .route("/api/item-info/batch", web::post().to(get_item_info_batch))
+            .route("/api/enchant-info/{id}", web::get().to(get_enchant_info))
+            .route("/api/gem-info/{id}", web::get().to(get_gem_info))
+            .route("/api/upgrade-options", web::get().to(get_upgrade_options))
+            .route("/health", web::get().to(health_check))
+    })
+    .bind(&bind_addr)
+    .expect(&format!("Failed to bind to {}", bind_addr))
+    .run();
+
+    tokio::spawn(server);
+
+    println!("HTTP server started on port {}", port);
+    port
+}

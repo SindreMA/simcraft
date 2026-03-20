@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  output: process.env.TAURI_BUILD ? "export" : "standalone",
   images: {
     remotePatterns: [
       {

@@ -2,8 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_URL } from "../lib/api";
 
 const ITERATION_STEPS = [100, 250, 500, 1000, 2500, 5000, 10000];
 

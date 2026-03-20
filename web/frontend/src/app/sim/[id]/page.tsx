@@ -7,12 +7,15 @@ import SimStatus from "../../components/SimStatus";
 import StatWeightsTable from "../../components/StatWeightsTable";
 import TopGearResults from "../../components/TopGearResults";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_URL } from "../../lib/api";
 
 interface JobData {
   id: string;
   status: string;
   progress: number;
+  progress_stage?: string;
+  progress_detail?: string;
+  stages_completed?: string[];
   result: Record<string, unknown> | null;
   error: string | null;
 }
@@ -77,7 +80,15 @@ export default function SimResultPage() {
   }
 
   if (job.status === "pending" || job.status === "running") {
-    return <SimStatus status={job.status} iterations={1000} />;
+    return (
+      <SimStatus
+        status={job.status}
+        progress={job.progress}
+        progressStage={job.progress_stage}
+        progressDetail={job.progress_detail}
+        stagesCompleted={job.stages_completed}
+      />
+    );
   }
 
   if (!job.result) {

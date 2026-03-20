@@ -5,8 +5,7 @@ import { ItemsBySlot, ParsedItem, GEAR_SLOTS } from "../lib/parseAddonString";
 import { useItemInfo, useEnchantInfo, useGemInfo, getIconUrl, getWowheadUrl, getWowheadData, QUALITY_COLORS } from "../lib/useItemInfo";
 import type { ItemQuery, ItemInfo, EnchantInfo, GemInfo } from "../lib/useItemInfo";
 import { useWowheadTooltips } from "../lib/useWowheadTooltips";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { API_URL } from "../lib/api";
 
 interface UpgradeOption {
   bonus_id: number;

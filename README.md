@@ -1,16 +1,27 @@
 # SimHammer
 
-Self-hosted [SimulationCraft](https://github.com/simulationcraft/simc) web app. Paste your SimC addon string, configure options, and get DPS results with ability breakdowns, stat weights, and Top Gear comparisons.
+SimulationCraft made simple. Run sims from your browser or download the desktop app.
+
+**[simhammer.com](https://simhammer.com)** · **[Download Desktop App](https://github.com/sortbek/simcraft/releases/latest)**
+
+## Features
+
+- **Quick Sim** — Paste your SimC addon string, get DPS and ability breakdown
+- **Top Gear** — Find the best gear combination from your bags, bank, and vault
+- **Stat Weights** — See which stats matter most for your character
+- **Desktop App** — Run everything locally with all your CPU cores, no server needed
 
 ## Project Structure
 
 ```
 simhammer/
-├── web/           Web app (backend + frontend + Docker)
-├── desktop/       Desktop app (Tauri, planned)
+├── web/           Web app (Python backend + Next.js frontend + Docker)
+├── desktop/       Desktop app (Tauri + Rust backend)
 ```
 
-## Quick Start (Docker)
+## Web App
+
+### Quick Start (Docker)
 
 ```bash
 git clone <repo-url> simhammer
@@ -21,93 +32,60 @@ docker compose up --build
 
 - Frontend: http://localhost:3000
 - API: http://localhost:8000
-- API docs: http://localhost:8000/docs
 
-## Deploy to a VPS
+### Deploy to a VPS
 
 1. Clone the repo on your server
-2. Create `web/.env` and set `SERVER_IP`:
+2. Create `web/.env` with `SERVER_IP=your-domain.com`
+3. Run `docker compose up -d --build`
+4. Set up nginx as reverse proxy (port 80 → 3000 for frontend, /api/ → 8000 for backend)
+
+## Desktop App
+
+### Download
+
+Grab the latest installer from [GitHub Releases](https://github.com/sortbek/simcraft/releases/latest).
+
+### Build from Source
+
+Prerequisites: Rust, Node.js 20+, simc binary
 
 ```bash
-cd simhammer/web
-cp .env.example .env
-nano .env
-# Set SERVER_IP=simhammer.com
-```
+# Build simc from source
+git clone --depth 1 https://github.com/simulationcraft/simc.git
+cd simc && mkdir build && cd build
+cmake .. -G "Visual Studio 17 2022" -A x64
+cmake --build . --config Release --target simc
+# Copy simc.exe to desktop/src-tauri/resources/simc/
 
-3. Start the stack:
+# Download game data
+# Place Raidbots JSON files in desktop/src-tauri/resources/data/
 
-```bash
-docker compose up -d --build
-```
-
-## Local Dev (without Docker)
-
-### Prerequisites
-- Python 3.11+
-- Node.js 20+
-- Redis
-- SimulationCraft binary (`simc`) — [download](https://github.com/simulationcraft/simc/releases) or build from source
-
-### 1. Start Redis
-```bash
-redis-server
-```
-
-### 2. Backend
-```bash
-cd web/backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-### 3. Worker
-```bash
-cd web/backend
-source venv/bin/activate
-python -m arq worker.tasks.WorkerSettings
-```
-
-### 4. Frontend
-```bash
-cd web/frontend
+# Build the app
+cd simhammer/desktop
 npm install
-npm run dev
+npx tauri build
 ```
+
+The installer will be in `desktop/src-tauri/target/release/bundle/nsis/`.
 
 ## Getting a SimC Addon String
 
 1. Install the [SimulationCraft addon](https://www.curseforge.com/wow/addons/simulationcraft) in WoW
 2. In-game, type `/simc`
 3. Copy the full text from the popup window
-4. Paste it into the input box
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `SIMC_PATH` | `/usr/local/bin/simc` | Path to simc binary |
-| `SIMC_THREADS` | `4` | Threads per simc process |
-| `SIMC_TIMEOUT` | `300` | Max seconds per simulation |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./simhammer.db` | Database connection string |
-| `MAX_ITERATIONS` | `10000` | Maximum allowed iterations |
-| `DEFAULT_ITERATIONS` | `1000` | Default iteration count |
-| `DROP_DB_ON_STARTUP` | `false` | Wipe DB on boot (useful for dev) |
-| `SERVER_IP` | `localhost` | Server IP/domain used in docker-compose |
-
-## Scaling Workers
-
-```bash
-docker compose up --scale worker=4
-```
+4. Paste it into SimHammer
 
 ## Architecture
 
+### Web
 ```
-Browser → Next.js (3000) → FastAPI (8000) → Redis Queue → ARQ Worker → simc subprocess
-                                                ↓
-                                            SQLite DB
+Browser → Next.js (3000) → FastAPI (8000) → Redis → ARQ Worker → simc
 ```
+
+### Desktop
+```
+Tauri Window → Next.js → Rust HTTP Server (17384) → simc subprocess
+```
+
+Both use the same frontend. The desktop app replaces Python + Redis with a single Rust binary that runs simc directly using all available CPU cores.

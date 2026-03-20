@@ -50,6 +50,7 @@ class TopGearRequest(BaseModel):
     fight_style: FightStyle = FightStyle.PATCHWERK
     target_error: float = Field(default=0.1, ge=0.1, le=1.0)
     max_upgrade: bool = False
+    copy_enchants: bool = False
 
 
 class ItemInfoRequest(BaseModel):

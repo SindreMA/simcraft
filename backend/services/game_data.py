@@ -203,6 +203,40 @@ def upgrade_simc_input(simc_input: str) -> str:
     return re.sub(r"bonus_id=([0-9/:]+)", _replace_bonus, simc_input)
 
 
+def apply_copy_enchants(items_by_slot: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Copy the equipped item's enchant to all alternatives in the same slot.
+
+    Modifies both the item dict (enchant_id) and the simc_string.
+    """
+    import re
+
+    result = {}
+    for slot, items in items_by_slot.items():
+        equipped = next((it for it in items if it.get("is_equipped")), None)
+        if not equipped or not equipped.get("enchant_id"):
+            result[slot] = items
+            continue
+
+        ench_id = equipped["enchant_id"]
+        new_items = []
+        for item in items:
+            if item.get("is_equipped") or item.get("enchant_id") == ench_id:
+                new_items.append(item)
+                continue
+            # Copy enchant to this alternative
+            updated = {**item, "enchant_id": ench_id}
+            simc = item.get("simc_string", "")
+            if "enchant_id=" in simc:
+                simc = re.sub(r"enchant_id=\d+", f"enchant_id={ench_id}", simc)
+            else:
+                # Insert enchant_id after the id= field
+                simc = re.sub(r"(,id=\d+)", rf"\1,enchant_id={ench_id}", simc)
+            updated["simc_string"] = simc
+            new_items.append(updated)
+        result[slot] = new_items
+    return result
+
+
 def get_enchant_info(enchant_id: int) -> dict[str, Any] | None:
     """Get enchant info dict ready for API response, or None if not found."""
     enchant = _enchants.get(enchant_id)

@@ -37,6 +37,11 @@
   }
 }
 
+/* Desktop (Tauri) visibility — prevents flicker on navigation */
+.desktop-only { display: none; }
+html[data-tauri] .desktop-only { display: contents; }
+html[data-tauri] .web-only { display: none; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

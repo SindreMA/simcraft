@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import DesktopAppLink from "./components/DesktopAppLink";
+import SettingsPopover from "./components/SettingsPopover";
+import { SimProvider } from "./components/SimContext";
+import SimSharedConfig from "./components/SimSharedConfig";
 import SimTypeCards from "./components/SimTypeCards";
-import SystemInfo from "./components/SystemInfo";
 import UpdateChecker from "./components/UpdateChecker";
+import WindowTitlebar from "./components/WindowTitlebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,6 +22,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if(window.__TAURI_INTERNALS__)document.documentElement.setAttribute("data-tauri","")`,
+          }}
+        />
         <Script
           id="wowhead-config"
           strategy="beforeInteractive"
@@ -29,29 +37,33 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-screen">
+        <WindowTitlebar />
         <UpdateChecker />
-        <header className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur-xl">
-          <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
-            <a href="/" className="flex items-center gap-2 group">
-              <div className="w-5 h-5 rounded bg-gold/90 flex items-center justify-center">
-                <svg className="w-3 h-3 text-black" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M3 2l10 6-10 6V2z" />
-                </svg>
+        <SimProvider>
+          <header className="sticky top-0 z-50 border-b border-border bg-bg/80 backdrop-blur-xl">
+            <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
+              <a href="/" className="flex items-center gap-2 group">
+                <div className="w-5 h-5 rounded bg-gold/90 flex items-center justify-center">
+                  <svg className="w-3 h-3 text-black" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M3 2l10 6-10 6V2z" />
+                  </svg>
+                </div>
+                <span className="text-sm font-semibold text-gray-200 group-hover:text-white transition-colors">
+                  SimHammer
+                </span>
+              </a>
+              <div className="flex items-center gap-2">
+                <SettingsPopover />
+                <DesktopAppLink />
               </div>
-              <span className="text-sm font-semibold text-gray-200 group-hover:text-white transition-colors">
-                SimHammer
-              </span>
-            </a>
-            <div className="flex items-center gap-3">
-              <SystemInfo />
-              <DesktopAppLink />
             </div>
-          </div>
-        </header>
-        <main className="max-w-5xl mx-auto px-6 py-10">
-          <SimTypeCards />
-          {children}
-        </main>
+          </header>
+          <main className="max-w-5xl mx-auto px-6 py-10">
+            <SimTypeCards />
+            <SimSharedConfig />
+            {children}
+          </main>
+        </SimProvider>
         <footer className="border-t border-border/50 mt-16 py-6">
           <p className="text-center text-[11px] text-gray-600 max-w-lg mx-auto leading-relaxed">
             SimHammer is a pet project held together by coffee, duct tape, and prayers to the RNG gods.

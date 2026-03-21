@@ -1,27 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import FightStyleSelector from "../components/FightStyleSelector";
-import ThreadPresetSelector from "../components/ThreadPresetSelector";
+import { useSimContext } from "../components/SimContext";
 import TopGearItemSelector from "../components/TopGearItemSelector";
 import {
   ItemsBySlot,
   GEAR_SLOTS,
   parseAddonString,
 } from "../lib/parseAddonString";
-
 import { API_URL } from "../lib/api";
 
 export default function TopGearPage() {
-  const [simcInput, setSimcInput] = useState("");
+  const { simcInput, fightStyle, threads } = useSimContext();
   const [itemsBySlot, setItemsBySlot] = useState<ItemsBySlot | null>(null);
   const [selectedItems, setSelectedItems] = useState<Record<string, number[]>>(
     {}
   );
-  const [fightStyle, setFightStyle] = useState("Patchwerk");
   const [maxUpgrade, setMaxUpgrade] = useState(false);
   const [copyEnchants, setCopyEnchants] = useState(true);
-  const [threads, setThreads] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const prevInputRef = useRef("");
@@ -90,94 +86,84 @@ export default function TopGearPage() {
     }
   }
 
+  if (!itemsBySlot) {
+    return (
+      <p className="text-sm text-muted text-center py-6">
+        Paste your SimC addon export above to see gear options.
+      </p>
+    );
+  }
+
   return (
-    <div className="space-y-8">
-      <div className="card p-5">
-        <label className="label-text">SimC Addon Export</label>
-        <textarea
-          value={simcInput}
-          onChange={(e) => setSimcInput(e.target.value)}
-          placeholder="Paste your SimC addon export here…"
-          className="input-field h-36 font-mono text-xs resize-y"
-        />
+    <div className="space-y-6">
+      <div className="card p-5 flex flex-col sm:flex-row gap-4">
+        <label className="flex items-center gap-3 cursor-pointer group flex-1">
+          <div
+            className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
+              copyEnchants ? "bg-gold" : "bg-surface-2 border border-border"
+            }`}
+            onClick={() => setCopyEnchants(!copyEnchants)}
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                copyEnchants ? "left-[18px] bg-black" : "left-0.5 bg-gray-500"
+              }`}
+            />
+          </div>
+          <div>
+            <span className="text-[13px] font-medium text-gray-300 group-hover:text-white transition-colors">
+              Copy Enchants
+            </span>
+            <p className="text-[11px] text-gray-600">
+              Apply equipped enchants to alternatives
+            </p>
+          </div>
+        </label>
+        <label className="flex items-center gap-3 cursor-pointer group flex-1">
+          <div
+            className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
+              maxUpgrade ? "bg-gold" : "bg-surface-2 border border-border"
+            }`}
+            onClick={() => setMaxUpgrade(!maxUpgrade)}
+          >
+            <div
+              className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                maxUpgrade ? "left-[18px] bg-black" : "left-0.5 bg-gray-500"
+              }`}
+            />
+          </div>
+          <div>
+            <span className="text-[13px] font-medium text-gray-300 group-hover:text-white transition-colors">
+              Sim Highest Upgrade
+            </span>
+            <p className="text-[11px] text-gray-600">
+              Simulate all items at max upgrade level
+            </p>
+          </div>
+        </label>
       </div>
 
-      {itemsBySlot && (
-        <>
-          <FightStyleSelector value={fightStyle} onChange={setFightStyle} />
+      <TopGearItemSelector
+        itemsBySlot={itemsBySlot}
+        selectedItems={selectedItems}
+        onSelectionChange={setSelectedItems}
+        onItemsChange={setItemsBySlot}
+        maxUpgrade={maxUpgrade}
+      />
 
-          <div className="card p-5 flex flex-col sm:flex-row gap-4">
-            <label className="flex items-center gap-3 cursor-pointer group flex-1">
-              <div
-                className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
-                  copyEnchants ? "bg-gold" : "bg-surface-2 border border-border"
-                }`}
-                onClick={() => setCopyEnchants(!copyEnchants)}
-              >
-                <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                    copyEnchants ? "left-[18px] bg-black" : "left-0.5 bg-gray-500"
-                  }`}
-                />
-              </div>
-              <div>
-                <span className="text-[13px] font-medium text-gray-300 group-hover:text-white transition-colors">
-                  Copy Enchants
-                </span>
-                <p className="text-[11px] text-gray-600">
-                  Apply equipped enchants to alternatives
-                </p>
-              </div>
-            </label>
-            <label className="flex items-center gap-3 cursor-pointer group flex-1">
-              <div
-                className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${
-                  maxUpgrade ? "bg-gold" : "bg-surface-2 border border-border"
-                }`}
-                onClick={() => setMaxUpgrade(!maxUpgrade)}
-              >
-                <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                    maxUpgrade ? "left-[18px] bg-black" : "left-0.5 bg-gray-500"
-                  }`}
-                />
-              </div>
-              <div>
-                <span className="text-[13px] font-medium text-gray-300 group-hover:text-white transition-colors">
-                  Sim Highest Upgrade
-                </span>
-                <p className="text-[11px] text-gray-600">
-                  Simulate all items at max upgrade level
-                </p>
-              </div>
-            </label>
-          </div>
-
-          <TopGearItemSelector
-            itemsBySlot={itemsBySlot}
-            selectedItems={selectedItems}
-            onSelectionChange={setSelectedItems}
-            onItemsChange={setItemsBySlot}
-            maxUpgrade={maxUpgrade}
-          />
-
-          <ThreadPresetSelector value={threads} onChange={setThreads} />
-
-          {error && (
-            <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-400">
-              {error}
-            </div>
-          )}
-
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="btn-primary w-full py-3 text-sm"
-          >
-            {submitting ? "Running…" : "Find Top Gear"}
-          </button>
-        </>
+      {error && (
+        <div className="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
       )}
+
+      <button
+        onClick={handleSubmit}
+        disabled={submitting}
+        className="btn-primary w-full py-3 text-sm"
+      >
+        {submitting ? "Running…" : "Find Top Gear"}
+      </button>
     </div>
   );
 }

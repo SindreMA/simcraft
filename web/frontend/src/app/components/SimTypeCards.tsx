@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const simTypes = [
@@ -37,7 +38,7 @@ export default function SimTypeCards() {
           (p) => pathname === p || pathname.startsWith(p + "/")
         );
         return (
-          <a
+          <Link
             key={sim.href}
             href={sim.href}
             className={`card p-4 group transition-all ${
@@ -63,7 +64,7 @@ export default function SimTypeCards() {
                 </p>
               </div>
             </div>
-          </a>
+          </Link>
         );
       })}
     </div>

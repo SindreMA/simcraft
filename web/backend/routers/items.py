@@ -80,6 +80,21 @@ async def get_gem_info(gem_id: int):
     return game_data.get_gem_info(gem_id) or {"gem_id": gem_id, "name": "", "icon": "", "quality": 3}
 
 
+@router.post("/api/max-upgrade-ilevels")
+async def get_max_upgrade_ilevels(items: list[dict]):
+    """For each item, return the max upgrade ilevel given its bonus_ids."""
+    results: dict[str, int] = {}
+    for item in items[:200]:
+        item_id = item.get("item_id", 0)
+        bonus_ids = item.get("bonus_ids", [])
+        upgraded = game_data.upgrade_bonus_ids_to_max(bonus_ids)
+        info = game_data.get_item_info(item_id, upgraded)
+        if info:
+            key = f"{item_id}:{','.join(str(b) for b in sorted(bonus_ids))}"
+            results[key] = info["ilevel"]
+    return results
+
+
 @router.get("/api/upgrade-options")
 async def get_upgrade_options(bonus_ids: str):
     """Get all upgrade levels for an item given its bonus IDs."""

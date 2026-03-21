@@ -203,6 +203,45 @@ def upgrade_simc_input(simc_input: str) -> str:
     return re.sub(r"bonus_id=([0-9/:]+)", _replace_bonus, simc_input)
 
 
+def upgrade_items_by_slot(items_by_slot: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Upgrade all items in items_by_slot to their max upgrade level.
+
+    Updates bonus_ids, simc_string, and ilevel for each item.
+    """
+    import re
+
+    upgraded: dict[str, list[dict]] = {}
+    for slot, items in items_by_slot.items():
+        new_items = []
+        for item in items:
+            item = dict(item)  # shallow copy
+            old_bonus_ids = item.get("bonus_ids", [])
+            new_bonus_ids = upgrade_bonus_ids_to_max(old_bonus_ids)
+
+            if new_bonus_ids != old_bonus_ids:
+                item["bonus_ids"] = new_bonus_ids
+                # Update simc_string with new bonus_ids
+                simc = item.get("simc_string", "")
+                if simc:
+                    def _replace_bonus(match: re.Match) -> str:
+                        raw = match.group(1)
+                        sep = "/" if "/" in raw else ":"
+                        return f"bonus_id={sep.join(str(b) for b in new_bonus_ids)}"
+                    item["simc_string"] = re.sub(r"bonus_id=([0-9/:]+)", _replace_bonus, simc)
+
+                # Recalculate ilevel from the base item + new bonuses
+                item_id = item.get("item_id", 0)
+                base_item = _items.get(item_id)
+                if base_item:
+                    base_ilevel = base_item.get("itemLevel", 0)
+                    resolved = _resolve_bonuses(new_bonus_ids)
+                    item["ilevel"] = resolved.get("ilevel", base_ilevel)
+
+            new_items.append(item)
+        upgraded[slot] = new_items
+    return upgraded
+
+
 def apply_copy_enchants(items_by_slot: dict[str, list[dict]]) -> dict[str, list[dict]]:
     """Copy the equipped item's enchant to all alternatives in the same slot.
 

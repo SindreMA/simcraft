@@ -191,6 +191,10 @@ async fn create_top_gear_sim(
         serde_json::from_value(ibs_val).unwrap_or_default()
     };
 
+    if req.max_upgrade {
+        items_by_slot = game_data::upgrade_items_by_slot(&items_by_slot);
+    }
+
     if req.copy_enchants {
         items_by_slot = game_data::apply_copy_enchants(&items_by_slot);
     }
@@ -480,6 +484,31 @@ async fn get_gem_info(path: web::Path<u64>) -> HttpResponse {
     HttpResponse::Ok().json(result)
 }
 
+async fn get_max_upgrade_ilevels(body: web::Json<Vec<Value>>) -> HttpResponse {
+    let mut results: HashMap<String, u64> = HashMap::new();
+    for item in body.iter().take(200) {
+        let item_id = item.get("item_id").and_then(|v| v.as_u64()).unwrap_or(0);
+        let bonus_ids: Vec<u64> = item
+            .get("bonus_ids")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
+            .unwrap_or_default();
+        let upgraded = game_data::upgrade_bonus_ids_to_max(&bonus_ids);
+        if let Some(info) = game_data::get_item_info(item_id, Some(&upgraded)) {
+            let ilevel = info.get("ilevel").and_then(|v| v.as_u64()).unwrap_or(0);
+            let mut sorted_ids = bonus_ids.clone();
+            sorted_ids.sort();
+            let key = format!(
+                "{}:{}",
+                item_id,
+                sorted_ids.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+            );
+            results.insert(key, ilevel);
+        }
+    }
+    HttpResponse::Ok().json(results)
+}
+
 async fn get_upgrade_options(query: web::Query<BonusIdsQuery>) -> HttpResponse {
     let ids: Vec<u64> = query
         .bonus_ids
@@ -578,6 +607,7 @@ pub async fn start(resource_dir: &Path, frontend_dir: Option<PathBuf>) -> u16 {
             .route("/api/item-info/batch", web::post().to(get_item_info_batch))
             .route("/api/enchant-info/{id}", web::get().to(get_enchant_info))
             .route("/api/gem-info/{id}", web::get().to(get_gem_info))
+            .route("/api/max-upgrade-ilevels", web::post().to(get_max_upgrade_ilevels))
             .route("/api/upgrade-options", web::get().to(get_upgrade_options))
             .route("/health", web::get().to(health_check))
             .route("/api/system-stats", web::get().to(system_stats));

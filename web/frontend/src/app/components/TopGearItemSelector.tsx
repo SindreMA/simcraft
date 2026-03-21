@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ItemsBySlot, ParsedItem, GEAR_SLOTS } from "../lib/parseAddonString";
 import { useItemInfo, useEnchantInfo, useGemInfo, getIconUrl, getWowheadUrl, getWowheadData, QUALITY_COLORS } from "../lib/useItemInfo";
 import type { ItemQuery, ItemInfo, EnchantInfo, GemInfo } from "../lib/useItemInfo";
@@ -21,6 +21,7 @@ interface TopGearItemSelectorProps {
   selectedItems: Record<string, number[]>;
   onSelectionChange: (selected: Record<string, number[]>) => void;
   onItemsChange: (items: ItemsBySlot) => void;
+  maxUpgrade?: boolean;
 }
 
 interface DisplayGroup {
@@ -57,10 +58,37 @@ export default function TopGearItemSelector({
   selectedItems,
   onSelectionChange,
   onItemsChange,
+  maxUpgrade,
 }: TopGearItemSelectorProps) {
   const [upgradeMenuFor, setUpgradeMenuFor] = useState<string | null>(null);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
   const [loadingUpgrades, setLoadingUpgrades] = useState(false);
+  const [maxUpgradeIlevels, setMaxUpgradeIlevels] = useState<Record<string, number>>({});
+
+  // Fetch max upgrade ilevels when toggle is on
+  useEffect(() => {
+    if (!maxUpgrade) {
+      setMaxUpgradeIlevels({});
+      return;
+    }
+    const items: { item_id: number; bonus_ids: number[] }[] = [];
+    for (const slotItems of Object.values(itemsBySlot)) {
+      for (const item of slotItems) {
+        if (item.item_id > 0 && item.bonus_ids.length > 0) {
+          items.push({ item_id: item.item_id, bonus_ids: item.bonus_ids });
+        }
+      }
+    }
+    if (items.length === 0) return;
+    fetch(`${API_URL}/api/max-upgrade-ilevels`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(items),
+    })
+      .then((r) => r.json())
+      .then((data) => setMaxUpgradeIlevels(data))
+      .catch(() => setMaxUpgradeIlevels({}));
+  }, [maxUpgrade, itemsBySlot]);
 
   const openUpgradeMenu = useCallback(async (item: ParsedItem, slot: string, key: string) => {
     if (upgradeMenuFor === key) {
@@ -164,6 +192,14 @@ export default function TopGearItemSelector({
     return di.item.ilevel || info?.ilevel || 0;
   };
 
+  const getMaxUpgradeIlevel = (item: ParsedItem): number | undefined => {
+    if (!maxUpgrade || !item.bonus_ids.length) return undefined;
+    const key = `${item.item_id}:${[...item.bonus_ids].sort((a, b) => a - b).join(",")}`;
+    const maxIlvl = maxUpgradeIlevels[key];
+    const currentIlvl = item.ilevel || 0;
+    return maxIlvl && maxIlvl > currentIlvl ? maxIlvl : undefined;
+  };
+
   const visibleGroups = useMemo(() => {
     const result: {
       group: DisplayGroup;
@@ -189,7 +225,7 @@ export default function TopGearItemSelector({
                 group.slots.length > 1 ? `Slot ${si + 1}` : undefined,
             });
           } else {
-            const key = `${item.item_id}:${[...item.bonus_ids].sort().join(",")}`;
+            const key = `${item.item_id}:${[...item.bonus_ids].sort((a, b) => a - b).join(",")}`;
             if (seenAltKeys.has(key)) continue;
             seenAltKeys.add(key);
             alternatives.push({ item, slot, index: idx });
@@ -347,6 +383,7 @@ export default function TopGearItemSelector({
                     gem={di.item.gem_id > 0 ? gemInfoMap[di.item.gem_id] : undefined}
                     qc={qc}
                     name={name}
+                    maxUpgradeIlevel={getMaxUpgradeIlevel(di.item)}
                     upgradeMenuKey={`${di.slot}-${di.index}`}
                     upgradeMenuFor={upgradeMenuFor}
                     upgradeOptions={upgradeOptions}
@@ -429,6 +466,7 @@ export default function TopGearItemSelector({
                     gem={di.item.gem_id > 0 ? gemInfoMap[di.item.gem_id] : undefined}
                     qc={qc}
                     name={name}
+                    maxUpgradeIlevel={getMaxUpgradeIlevel(di.item)}
                     upgradeMenuKey={`${di.slot}-${di.index}`}
                     upgradeMenuFor={upgradeMenuFor}
                     upgradeOptions={upgradeOptions}
@@ -453,6 +491,7 @@ function ItemDetails({
   gem,
   qc,
   name,
+  maxUpgradeIlevel,
   upgradeMenuKey,
   upgradeMenuFor,
   upgradeOptions,
@@ -466,6 +505,7 @@ function ItemDetails({
   gem?: GemInfo;
   qc: string;
   name: string;
+  maxUpgradeIlevel?: number;
   upgradeMenuKey: string;
   upgradeMenuFor: string | null;
   upgradeOptions: UpgradeOption[];
@@ -560,8 +600,15 @@ function ItemDetails({
             </svg>
           </button>
         )}
-        <span className="text-[10px] text-muted font-mono tabular-nums">
-          {ilevel > 0 && ilevel}
+        <span className="text-[10px] font-mono tabular-nums">
+          {maxUpgradeIlevel ? (
+            <>
+              <span className="text-muted line-through opacity-50">{ilevel}</span>
+              <span className="text-emerald-400 ml-1">{maxUpgradeIlevel}</span>
+            </>
+          ) : (
+            <span className="text-muted">{ilevel > 0 && ilevel}</span>
+          )}
         </span>
       </div>
     </>

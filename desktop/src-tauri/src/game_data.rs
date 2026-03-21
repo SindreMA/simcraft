@@ -309,6 +309,66 @@ pub fn upgrade_simc_input(simc_input: &str) -> String {
     .to_string()
 }
 
+pub fn upgrade_items_by_slot(
+    items_by_slot: &HashMap<String, Vec<Value>>,
+) -> HashMap<String, Vec<Value>> {
+    let bonus_re = regex::Regex::new(r"bonus_id=([0-9/:]+)").unwrap();
+    let mut result = HashMap::new();
+
+    for (slot, items) in items_by_slot {
+        let new_items: Vec<Value> = items
+            .iter()
+            .map(|item| {
+                let old_bonus_ids: Vec<u64> = item
+                    .get("bonus_ids")
+                    .and_then(|b| b.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
+                    .unwrap_or_default();
+
+                let new_bonus_ids = upgrade_bonus_ids_to_max(&old_bonus_ids);
+
+                if new_bonus_ids == old_bonus_ids {
+                    return item.clone();
+                }
+
+                let mut updated = item.clone();
+                updated["bonus_ids"] = serde_json::json!(new_bonus_ids);
+
+                // Update simc_string with new bonus_ids
+                if let Some(simc) = item.get("simc_string").and_then(|s| s.as_str()) {
+                    let new_simc = bonus_re.replace(simc, |caps: &regex::Captures| {
+                        let raw = &caps[1];
+                        let sep = if raw.contains('/') { "/" } else { ":" };
+                        format!(
+                            "bonus_id={}",
+                            new_bonus_ids
+                                .iter()
+                                .map(|id| id.to_string())
+                                .collect::<Vec<_>>()
+                                .join(sep)
+                        )
+                    }).to_string();
+                    updated["simc_string"] = serde_json::json!(new_simc);
+                }
+
+                // Recalculate ilevel from base item + new bonuses
+                let item_id = item.get("item_id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let items_map = self::items();
+                if let Some(base_item) = items_map.get(&item_id) {
+                    let base_ilevel = base_item.get("itemLevel").and_then(|v: &Value| v.as_u64()).unwrap_or(0);
+                    let resolved = resolve_bonuses(&new_bonus_ids);
+                    let new_ilevel = resolved.get("ilevel").and_then(|v: &Value| v.as_u64()).unwrap_or(base_ilevel);
+                    updated["ilevel"] = serde_json::json!(new_ilevel);
+                }
+
+                updated
+            })
+            .collect();
+        result.insert(slot.clone(), new_items);
+    }
+    result
+}
+
 pub fn apply_copy_enchants(
     items_by_slot: &HashMap<String, Vec<Value>>,
 ) -> HashMap<String, Vec<Value>> {

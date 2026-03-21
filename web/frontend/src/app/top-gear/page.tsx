@@ -158,6 +158,7 @@ export default function TopGearPage() {
             selectedItems={selectedItems}
             onSelectionChange={setSelectedItems}
             onItemsChange={setItemsBySlot}
+            maxUpgrade={maxUpgrade}
           />
 
           <ThreadPresetSelector value={threads} onChange={setThreads} />

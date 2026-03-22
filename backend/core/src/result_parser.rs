@@ -133,8 +133,6 @@ pub fn parse_simc_result(raw: &Value) -> Value {
     result
 }
 
-const PAIRED_SLOT_SET: &[&str] = &["finger1", "finger2", "trinket1", "trinket2"];
-
 fn extract_all_gear(player: &Value) -> HashMap<String, Value> {
     let empty = json!({});
     let gear = player.get("gear").unwrap_or(&empty);

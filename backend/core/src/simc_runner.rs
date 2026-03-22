@@ -145,7 +145,6 @@ async fn run_simc_subprocess(
     let mut cmd = Command::new(simc_path);
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS
         cmd.creation_flags(0x08000000 | 0x00004000);
     }

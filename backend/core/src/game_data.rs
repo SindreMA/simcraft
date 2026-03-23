@@ -738,7 +738,25 @@ pub fn get_instance_drops(
                     }
                 }
 
-                // Filter by spec restrictions
+                // Filter shields — only warriors, paladins, shamans can equip them
+                if inv_type == 14 {
+                    if let Some(cn) = class_name {
+                        if !matches!(cn, "warrior" | "paladin" | "shaman") {
+                            continue;
+                        }
+                    }
+                }
+
+                // Filter off-hand items — casters only (priests, mages, warlocks, druids, evokers)
+                if inv_type == 23 {
+                    if let Some(cn) = class_name {
+                        if !matches!(cn, "priest" | "mage" | "warlock" | "druid" | "shaman" | "evoker") {
+                            continue;
+                        }
+                    }
+                }
+
+                // Filter spec restrictions
                 if let Some(specs) = item.get("specs").and_then(|s| s.as_array()) {
                     if !allowed_specs.is_empty() {
                         let item_specs: Vec<u64> = specs.iter().filter_map(|v| v.as_u64()).collect();

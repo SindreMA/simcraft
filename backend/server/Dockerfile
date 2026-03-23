@@ -7,7 +7,8 @@ COPY Cargo.toml ./
 COPY core/ core/
 COPY server/ server/
 
-RUN cargo build --release -p simhammer-server
+ARG CARGO_FEATURES=
+RUN cargo build --release -p simhammer-server ${CARGO_FEATURES:+--features $CARGO_FEATURES}
 
 # --- Fetch game data from Raidbots ---
 FROM debian:bookworm-slim AS fetcher

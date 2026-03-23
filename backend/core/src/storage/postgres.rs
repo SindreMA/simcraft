@@ -7,6 +7,7 @@ use super::JobStorage;
 
 pub struct PostgresStorage {
     client: Mutex<Client>,
+    rt: tokio::runtime::Runtime,
 }
 
 impl PostgresStorage {
@@ -18,8 +19,13 @@ impl PostgresStorage {
             .await
             .expect("Failed to connect to PostgreSQL");
 
-        // Spawn the connection handler
-        tokio::spawn(async move {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to create Tokio runtime for PostgresStorage");
+
+        rt.spawn(async move {
             if let Err(e) = connection.await {
                 eprintln!("PostgreSQL connection error: {}", e);
             }
@@ -45,7 +51,20 @@ impl PostgresStorage {
             );"
         ).await.expect("Failed to create jobs table");
 
-        Self { client: Mutex::new(client) }
+        Self { client: Mutex::new(client), rt }
+    }
+
+    /// Run a closure with the DB client on a fresh OS thread,
+    /// avoiding Tokio's "cannot block within a runtime" restriction.
+    fn blocking<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&Client) -> T + Send,
+        T: Send,
+    {
+        let client = self.client.lock().unwrap();
+        std::thread::scope(|s| {
+            s.spawn(|| f(&client)).join().unwrap()
+        })
     }
 
     fn status_to_str(status: &JobStatus) -> &'static str {
@@ -95,113 +114,113 @@ impl PostgresStorage {
 
 impl JobStorage for PostgresStorage {
     fn insert(&self, job: Job) {
-        let client = self.client.lock().unwrap();
         let stages_json = serde_json::to_string(&job.stages_completed).unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.execute(
-                "INSERT INTO jobs (id, status, sim_type, simc_input, result_json, combo_metadata_json,
-                 error_message, progress_pct, progress_stage, progress_detail, stages_completed,
-                 iterations, fight_style, target_error, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
-                &[
-                    &job.id,
-                    &Self::status_to_str(&job.status),
-                    &job.sim_type,
-                    &job.simc_input,
-                    &job.result_json,
-                    &job.combo_metadata_json,
-                    &job.error_message,
-                    &(job.progress_pct as i32),
-                    &job.progress_stage,
-                    &job.progress_detail,
-                    &stages_json,
-                    &(job.iterations as i32),
-                    &job.fight_style,
-                    &job.target_error,
-                    &job.created_at,
-                ],
-            ).await.expect("Failed to insert job");
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "INSERT INTO jobs (id, status, sim_type, simc_input, result_json, combo_metadata_json,
+                     error_message, progress_pct, progress_stage, progress_detail, stages_completed,
+                     iterations, fight_style, target_error, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                    &[
+                        &job.id,
+                        &Self::status_to_str(&job.status),
+                        &job.sim_type,
+                        &job.simc_input,
+                        &job.result_json,
+                        &job.combo_metadata_json,
+                        &job.error_message,
+                        &(job.progress_pct as i32),
+                        &job.progress_stage,
+                        &job.progress_detail,
+                        &stages_json,
+                        &(job.iterations as i32),
+                        &job.fight_style,
+                        &job.target_error,
+                        &job.created_at,
+                    ],
+                ).await.expect("Failed to insert job");
+            });
         });
     }
 
     fn get(&self, id: &str) -> Option<Job> {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.query_opt(
-                "SELECT id, status, sim_type, simc_input, result_json, combo_metadata_json,
-                 error_message, progress_pct, progress_stage, progress_detail, stages_completed,
-                 iterations, fight_style, target_error, created_at
-                 FROM jobs WHERE id = $1",
-                &[&id],
-            ).await.ok().flatten().map(|row| Self::row_to_job(&row))
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.query_opt(
+                    "SELECT id, status, sim_type, simc_input, result_json, combo_metadata_json,
+                     error_message, progress_pct, progress_stage, progress_detail, stages_completed,
+                     iterations, fight_style, target_error, created_at
+                     FROM jobs WHERE id = $1",
+                    &[&id],
+                ).await.ok().flatten().map(|row| Self::row_to_job(&row))
+            })
         })
     }
 
     fn update_status(&self, id: &str, status: JobStatus) {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.execute(
-                "UPDATE jobs SET status = $1 WHERE id = $2",
-                &[&Self::status_to_str(&status), &id],
-            ).await.ok();
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET status = $1 WHERE id = $2",
+                    &[&Self::status_to_str(&status), &id],
+                ).await.ok();
+            });
         });
     }
 
     fn update_progress(&self, id: &str, pct: u8, stage: &str, detail: &str) {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.execute(
-                "UPDATE jobs SET progress_pct = $1, progress_stage = $2, progress_detail = $3 WHERE id = $4",
-                &[&(pct as i32), &stage, &detail, &id],
-            ).await.ok();
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET progress_pct = $1, progress_stage = $2, progress_detail = $3 WHERE id = $4",
+                    &[&(pct as i32), &stage, &detail, &id],
+                ).await.ok();
+            });
         });
     }
 
     fn complete_stage(&self, id: &str, summary: &str) {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            let row = client.query_opt(
-                "SELECT stages_completed FROM jobs WHERE id = $1",
-                &[&id],
-            ).await.ok().flatten();
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                let row = client.query_opt(
+                    "SELECT stages_completed FROM jobs WHERE id = $1",
+                    &[&id],
+                ).await.ok().flatten();
 
-            if let Some(row) = row {
-                let stages_str: String = row.get(0);
-                let mut stages: Vec<String> = serde_json::from_str(&stages_str).unwrap_or_default();
-                stages.push(summary.to_string());
-                let updated = serde_json::to_string(&stages).unwrap();
-                client.execute(
-                    "UPDATE jobs SET stages_completed = $1 WHERE id = $2",
-                    &[&updated, &id],
-                ).await.ok();
-            }
+                if let Some(row) = row {
+                    let stages_str: String = row.get(0);
+                    let mut stages: Vec<String> = serde_json::from_str(&stages_str).unwrap_or_default();
+                    stages.push(summary.to_string());
+                    let updated = serde_json::to_string(&stages).unwrap();
+                    client.execute(
+                        "UPDATE jobs SET stages_completed = $1 WHERE id = $2",
+                        &[&updated, &id],
+                    ).await.ok();
+                }
+            });
         });
     }
 
     fn set_result(&self, id: &str, result: String) {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.execute(
-                "UPDATE jobs SET result_json = $1, status = 'done' WHERE id = $2",
-                &[&result, &id],
-            ).await.ok();
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET result_json = $1, status = 'done' WHERE id = $2",
+                    &[&result, &id],
+                ).await.ok();
+            });
         });
     }
 
     fn set_error(&self, id: &str, error: String) {
-        let client = self.client.lock().unwrap();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            client.execute(
-                "UPDATE jobs SET error_message = $1, status = 'failed' WHERE id = $2",
-                &[&error, &id],
-            ).await.ok();
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET error_message = $1, status = 'failed' WHERE id = $2",
+                    &[&error, &id],
+                ).await.ok();
+            });
         });
     }
 }

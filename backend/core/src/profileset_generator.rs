@@ -39,7 +39,12 @@ fn detect_class(base_profile: &str) -> Option<String> {
     None
 }
 
-pub const MAX_COMBINATIONS: usize = 500;
+pub fn max_combinations() -> usize {
+    std::env::var("MAX_COMBINATIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1500)
+}
 
 const UNIQUE_SLOT_PAIRS: &[(&str, &str)] = &[
     ("finger1", "finger2"),
@@ -205,10 +210,11 @@ pub fn generate_top_gear_input(
     }
 
     let combo_count = valid_combos.len();
-    if combo_count > MAX_COMBINATIONS {
+    let max_combos = max_combinations();
+    if combo_count > max_combos {
         return Err(format!(
             "Too many combinations ({}). Maximum is {}. Please deselect some items.",
-            combo_count, MAX_COMBINATIONS
+            combo_count, max_combos
         ));
     }
 

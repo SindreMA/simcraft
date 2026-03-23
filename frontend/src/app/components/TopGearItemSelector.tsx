@@ -329,7 +329,7 @@ export default function TopGearItemSelector({
         </p>
         <span
           className={`text-xs font-mono px-2.5 py-1 rounded-md ${
-            comboCount > 500
+            comboCount > 1500
               ? "bg-red-500/10 text-red-400"
               : comboCount > 0
               ? "bg-surface-2 text-white"

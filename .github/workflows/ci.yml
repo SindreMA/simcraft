@@ -1,0 +1,120 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  REGISTRY: registry.k8s.sindrema.com
+  BACKEND_IMAGE: images/simhammer-backend
+  FRONTEND_IMAGE: images/simhammer-frontend
+  K8S_REPO: SindreMA/sindre-k8s
+  K8S_BACKEND_DEPLOYMENT: manifests/fun-stuff/simhammer-backend-deployment.yaml
+  K8S_FRONTEND_DEPLOYMENT: manifests/fun-stuff/simhammer-frontend-deployment.yaml
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.timestamp.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Harbor Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Generate timestamp tag
+        id: timestamp
+        run: echo "tag=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:${{ steps.timestamp.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE }}:latest
+          no-cache: true
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ steps.timestamp.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://sim.sindrema.com/api
+          no-cache: true
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout k8s manifests repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.K8S_REPO }}
+          path: k8s-repo
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Update Kubernetes deployments
+        run: |
+          IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+          echo "Updating deployments to use image tag: ${IMAGE_TAG}"
+
+          # Update backend deployment
+          sed -i "s|image: ${REGISTRY}/${BACKEND_IMAGE}[^[:space:]]*|image: ${REGISTRY}/${BACKEND_IMAGE}:${IMAGE_TAG}|g" \
+            "k8s-repo/${K8S_BACKEND_DEPLOYMENT}"
+
+          # Update frontend deployment
+          sed -i "s|image: ${REGISTRY}/${FRONTEND_IMAGE}[^[:space:]]*|image: ${REGISTRY}/${FRONTEND_IMAGE}:${IMAGE_TAG}|g" \
+            "k8s-repo/${K8S_FRONTEND_DEPLOYMENT}"
+
+          echo "Backend:"
+          grep "image:" "k8s-repo/${K8S_BACKEND_DEPLOYMENT}"
+          echo "Frontend:"
+          grep "image:" "k8s-repo/${K8S_FRONTEND_DEPLOYMENT}"
+
+      - name: Commit and push deployment update
+        run: |
+          cd k8s-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          IMAGE_TAG="${{ needs.build-and-push.outputs.image_tag }}"
+
+          git add "${K8S_BACKEND_DEPLOYMENT}" "${K8S_FRONTEND_DEPLOYMENT}"
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+          else
+            git commit -m "Update simhammer deployments to image tag ${IMAGE_TAG}"
+            git push
+            echo "Successfully pushed deployment update!"
+          fi
+        env:
+          K8S_BACKEND_DEPLOYMENT: ${{ env.K8S_BACKEND_DEPLOYMENT }}
+          K8S_FRONTEND_DEPLOYMENT: ${{ env.K8S_FRONTEND_DEPLOYMENT }}

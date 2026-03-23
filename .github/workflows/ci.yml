@@ -64,7 +64,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:${{ steps.timestamp.outputs.tag }}
             ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE }}:latest
           build-args: |
-            NEXT_PUBLIC_API_URL=https://sim.sindrema.com/api
+            NEXT_PUBLIC_API_URL=https://sim.sindrema.com
           no-cache: true
 
   deploy:

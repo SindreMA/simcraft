@@ -136,4 +136,6 @@ jobs:
             desktop/dist/*.dmg
             desktop/dist/*.AppImage
             desktop/dist/*.deb
+            desktop/dist/*.yml
+            desktop/dist/*.blockmap
           if-no-files-found: error

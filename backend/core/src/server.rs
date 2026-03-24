@@ -65,11 +65,27 @@ pub struct SimOptions {
     pub threads: u32,
     #[serde(default)]
     pub talents: String,
+    /// Custom APL and SimC expansion options (e.g., actions=..., midnight.*, use_blizzard_action_list).
     #[serde(default)]
-    pub custom_simc: String,
+    pub custom_apl: String,
+    // Expert Mode injection points
+    #[serde(default)]
+    pub simc_header: String,
+    #[serde(default)]
+    pub simc_base_player: String,
+    #[serde(default)]
+    pub simc_raid_actors: String,
+    #[serde(default)]
+    pub simc_post_combos: String,
+    #[serde(default)]
+    pub simc_footer: String,
 }
 
 impl SimOptions {
+    fn has_raid_actors(&self) -> bool {
+        !sanitize_custom_simc(&self.simc_raid_actors).trim().is_empty()
+    }
+
     fn to_json(&self) -> Value {
         json!({
             "fight_style": self.fight_style,
@@ -78,6 +94,7 @@ impl SimOptions {
             "desired_targets": self.desired_targets,
             "max_time": self.max_time,
             "threads": self.threads,
+            "single_actor_batch": !self.has_raid_actors(),
         })
     }
 
@@ -143,7 +160,7 @@ pub struct BonusIdsQuery {
 
 fn default_iterations() -> u32 { 1000 }
 fn default_fight_style() -> String { "Patchwerk".to_string() }
-fn default_target_error() -> f64 { 0.1 }
+fn default_target_error() -> f64 { 0.05 }
 fn default_sim_type() -> String { "quick".to_string() }
 fn default_desired_targets() -> u32 { 1 }
 fn default_max_time() -> u32 { 300 }
@@ -158,13 +175,157 @@ fn sanitize_custom_simc(input: &str) -> String {
         .join("\n")
 }
 
-/// Append custom SimC input to the end of a simc profile string.
-fn append_custom_simc(simc_input: &str, custom_simc: &str) -> String {
-    let sanitized = sanitize_custom_simc(custom_simc);
-    if sanitized.trim().is_empty() {
+/// Inject expert mode fields at the correct positions in the SimC profile.
+///
+/// For profileset sims (has `# Base Actor` and `### Combo` markers):
+///   {header} → # Base Actor → {base lines} → {base_player} → ### Combo 1 →
+///   {gear} → {raid_actors} → ### Combo 2..N → {post_combos} → {footer}
+///
+/// For quick sim (no markers):
+///   {header} → {raw input} → {base_player} → {raid_actors} → {post_combos} → {footer}
+fn inject_expert_fields(simc_input: &str, options: &SimOptions) -> String {
+    let header = sanitize_custom_simc(&options.simc_header);
+    let base_player = sanitize_custom_simc(&options.simc_base_player);
+    let custom_apl = sanitize_custom_simc(&options.custom_apl);
+    let raid_actors = sanitize_custom_simc(&options.simc_raid_actors);
+    let post_combos = sanitize_custom_simc(&options.simc_post_combos);
+    let footer = sanitize_custom_simc(&options.simc_footer);
+
+    let all_empty = header.trim().is_empty()
+        && base_player.trim().is_empty()
+        && custom_apl.trim().is_empty()
+        && raid_actors.trim().is_empty()
+        && post_combos.trim().is_empty()
+        && footer.trim().is_empty();
+
+    if all_empty {
         return simc_input.to_string();
     }
-    format!("{}\n\n# Custom SimC options\n{}", simc_input, sanitized)
+
+    let lines: Vec<&str> = simc_input.lines().collect();
+    let has_base_actor = lines.iter().any(|l| l.trim() == "# Base Actor");
+
+    if !has_base_actor {
+        // Quick Sim: no markers, just concatenate in order
+        let mut parts: Vec<&str> = Vec::new();
+        if !header.trim().is_empty() {
+            parts.push("# Header");
+            parts.push(&header);
+            parts.push("");
+        }
+        parts.push(simc_input);
+        if !base_player.trim().is_empty() {
+            parts.push("");
+            parts.push("# Base Player Customization");
+            parts.push(&base_player);
+        }
+        if !custom_apl.trim().is_empty() {
+            parts.push("");
+            parts.push("# Custom APL");
+            parts.push(&custom_apl);
+        }
+        if !raid_actors.trim().is_empty() {
+            parts.push("");
+            parts.push("# Raid Actors");
+            parts.push(&raid_actors);
+        }
+        if !post_combos.trim().is_empty() {
+            parts.push("");
+            parts.push("# Post Combination Actors");
+            parts.push(&post_combos);
+        }
+        if !footer.trim().is_empty() {
+            parts.push("");
+            parts.push("# Footer");
+            parts.push(&footer);
+        }
+        return parts.join("\n");
+    }
+
+    // Profileset sim: find markers and inject at the right positions
+    let mut result: Vec<String> = Vec::new();
+    let mut i = 0;
+    let mut injected_base_player = false;
+    let mut injected_raid_actors = false;
+    let mut _last_combo_end = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+
+        // Inject header before "# Base Actor"
+        if trimmed == "# Base Actor" && !header.trim().is_empty() {
+            result.push("# Header".to_string());
+            result.push(header.clone());
+            result.push(String::new());
+        }
+
+        // Inject base_player and custom_apl before "### Combo 1"
+        if trimmed == "### Combo 1" && !injected_base_player {
+            if !base_player.trim().is_empty() {
+                result.push("# Base Player Customization".to_string());
+                result.push(base_player.clone());
+                result.push(String::new());
+            }
+            if !custom_apl.trim().is_empty() {
+                result.push("# Custom APL".to_string());
+                result.push(custom_apl.clone());
+                result.push(String::new());
+            }
+            injected_base_player = true;
+        }
+
+        // Inject raid_actors before "### Combo 2"
+        if trimmed == "### Combo 2" && !raid_actors.trim().is_empty() && !injected_raid_actors {
+            result.push("# Raid Actors".to_string());
+            result.push(raid_actors.clone());
+            result.push(String::new());
+            injected_raid_actors = true;
+        }
+
+        result.push(lines[i].to_string());
+
+        // Track end of combo blocks
+        if trimmed.starts_with("### Combo") {
+            _last_combo_end = result.len();
+            // Scan ahead to find end of this combo block
+            i += 1;
+            while i < lines.len() {
+                let next = lines[i].trim();
+                if next.starts_with("### Combo") {
+                    break; // start of next combo, don't consume
+                }
+                result.push(lines[i].to_string());
+                _last_combo_end = result.len();
+                i += 1;
+            }
+            continue;
+        }
+
+        i += 1;
+    }
+
+    // If raid_actors wasn't injected (only 1 combo / no Combo 2), inject after Combo 1 block
+    if !injected_raid_actors && !raid_actors.trim().is_empty() {
+        result.push(String::new());
+        result.push("# Raid Actors".to_string());
+        result.push(raid_actors);
+    }
+
+    // Post combos after all profilesets
+    if !post_combos.trim().is_empty() {
+        result.push(String::new());
+        result.push("# Post Combination Actors".to_string());
+        result.push(post_combos);
+    }
+
+    // Footer at the very end
+    if !footer.trim().is_empty() {
+        result.push(String::new());
+        result.push("# Footer".to_string());
+        result.push(footer);
+    }
+
+    result.join("\n")
 }
 
 /// Replace the talents= line in a simc input string with a new talent string.
@@ -210,7 +371,7 @@ fn spawn_staged_sim(
         )
         .await
         {
-            Ok(raw) => {
+            Ok(output) => {
                 let job_snap = store.get(&job_id);
                 let meta: Option<HashMap<String, Vec<Value>>> = job_snap
                     .as_ref()
@@ -219,9 +380,11 @@ fn spawn_staged_sim(
                     .and_then(|v| v.get("_combo_metadata").cloned())
                     .and_then(|v| serde_json::from_value(v).ok());
 
-                let parsed = result_parser::parse_top_gear_result(&raw, meta.as_ref());
+                let parsed = result_parser::parse_top_gear_result(&output.json, meta.as_ref());
                 let result_str = serde_json::to_string(&parsed).unwrap_or_default();
-                store.set_result(&job_id, result_str);
+                let raw_str = serde_json::to_string(&output.json).ok();
+                store.set_result(&job_id, result_str, raw_str);
+                store.set_report_files(&job_id, output.html_report, output.text_output);
             }
             Err(e) => {
                 store.set_error(&job_id, e);
@@ -243,7 +406,7 @@ async fn create_sim(
         req.simc_input.clone()
     };
     simc_input = apply_talent_override(&simc_input, &req.options.talents);
-    simc_input = append_custom_simc(&simc_input, &req.options.custom_simc);
+    simc_input = inject_expert_fields(&simc_input, &req.options);
 
     let job = Job::new(
         simc_input.clone(),
@@ -266,10 +429,12 @@ async fn create_sim(
         store_clone.update_status(&job_id_clone, JobStatus::Running);
         store_clone.update_progress(&job_id_clone, 20, "Simulating", "");
         match simc_runner::run_simc(&simc, &job_id_clone, &simc_input, &options).await {
-            Ok(raw) => {
-                let parsed = result_parser::parse_simc_result(&raw);
+            Ok(output) => {
+                let parsed = result_parser::parse_simc_result(&output.json);
                 let result_str = serde_json::to_string(&parsed).unwrap_or_default();
-                store_clone.set_result(&job_id_clone, result_str);
+                let raw_str = serde_json::to_string(&output.json).ok();
+                store_clone.set_result(&job_id_clone, result_str, raw_str);
+                store_clone.set_report_files(&job_id_clone, output.html_report, output.text_output);
             }
             Err(e) => {
                 store_clone.set_error(&job_id_clone, e);
@@ -337,7 +502,7 @@ async fn create_top_gear_sim(
         }));
     }
 
-    let generated_input = append_custom_simc(&generated_input, &req.options.custom_simc);
+    let generated_input = inject_expert_fields(&generated_input, &req.options);
 
     let job = Job::new(
         generated_input.clone(),
@@ -398,7 +563,7 @@ async fn create_droptimizer_sim(
         }));
     }
 
-    let generated_input = append_custom_simc(&generated_input, &req.options.custom_simc);
+    let generated_input = inject_expert_fields(&generated_input, &req.options);
 
     let job = Job::new(
         generated_input.clone(),
@@ -480,6 +645,23 @@ async fn get_sim_status(
     }))
 }
 
+async fn get_sim_input(
+    path: web::Path<String>,
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    HttpResponse::Ok()
+        .content_type("text/plain; charset=utf-8")
+        .body(job.simc_input)
+}
+
 async fn get_sim_raw(
     path: web::Path<String>,
     store: web::Data<Arc<dyn JobStorage>>,
@@ -492,16 +674,117 @@ async fn get_sim_raw(
         }
     };
 
-    match &job.result_json {
-        Some(result) => match serde_json::from_str::<Value>(result) {
+    match &job.raw_json {
+        Some(raw) => match serde_json::from_str::<Value>(raw) {
             Ok(val) => HttpResponse::Ok().json(val),
             Err(_) => HttpResponse::InternalServerError()
-                .json(json!({"detail": "Failed to parse stored result"})),
+                .json(json!({"detail": "Failed to parse stored raw JSON"})),
         },
         None => {
-            HttpResponse::NotFound().json(json!({"detail": "No results available yet"}))
+            // Fallback to parsed result if raw not available
+            match &job.result_json {
+                Some(result) => match serde_json::from_str::<Value>(result) {
+                    Ok(val) => HttpResponse::Ok().json(val),
+                    Err(_) => HttpResponse::InternalServerError()
+                        .json(json!({"detail": "Failed to parse stored result"})),
+                },
+                None => HttpResponse::NotFound().json(json!({"detail": "No results available yet"})),
+            }
         }
     }
+}
+
+async fn get_sim_html(
+    path: web::Path<String>,
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    match &job.html_report {
+        Some(html) => HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(html.clone()),
+        None => HttpResponse::NotFound()
+            .json(json!({"detail": "HTML report not available for this sim"})),
+    }
+}
+
+async fn get_sim_text_output(
+    path: web::Path<String>,
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    match &job.text_output {
+        Some(text) => HttpResponse::Ok()
+            .content_type("text/plain; charset=utf-8")
+            .body(text.clone()),
+        None => HttpResponse::NotFound()
+            .json(json!({"detail": "Text output not available for this sim"})),
+    }
+}
+
+async fn get_sim_csv(
+    path: web::Path<String>,
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    let job_id = path.into_inner();
+    let job = match store.get(&job_id) {
+        Some(j) => j,
+        None => {
+            return HttpResponse::NotFound().json(json!({"detail": "Job not found"}));
+        }
+    };
+
+    let result = match &job.result_json {
+        Some(r) => match serde_json::from_str::<Value>(r) {
+            Ok(v) => v,
+            Err(_) => return HttpResponse::InternalServerError()
+                .json(json!({"detail": "Failed to parse result"})),
+        },
+        None => return HttpResponse::NotFound()
+            .json(json!({"detail": "No results available yet"})),
+    };
+
+    let mut csv = String::from("actor,dps,dps_error\n");
+
+    if result.get("type").and_then(|t| t.as_str()) == Some("top_gear") {
+        // Top Gear / Droptimizer: base + profileset results
+        if let Some(base_dps) = result.get("base_dps").and_then(|v| v.as_f64()) {
+            let name = result.get("player_name").and_then(|n| n.as_str()).unwrap_or("Base");
+            csv.push_str(&format!("{},{:.1},\n", name, base_dps));
+        }
+        if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
+            for r in results {
+                let name = r.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                let dps = r.get("dps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                csv.push_str(&format!("{},{:.1},\n", name, dps));
+            }
+        }
+    } else {
+        // Quick Sim
+        let name = result.get("player_name").and_then(|n| n.as_str()).unwrap_or("Player");
+        let dps = result.get("dps").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let error = result.get("dps_error").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        csv.push_str(&format!("{},{:.1},{:.1}\n", name, dps, error));
+    }
+
+    HttpResponse::Ok()
+        .content_type("text/csv; charset=utf-8")
+        .insert_header(("Content-Disposition", format!("attachment; filename=\"sim-{}.csv\"", job_id)))
+        .body(csv)
 }
 
 async fn get_item_info(
@@ -798,6 +1081,10 @@ pub async fn start_with_storage_bind(
             .route("/api/top-gear/sim", web::post().to(create_top_gear_sim))
             .route("/api/sim/{id}", web::get().to(get_sim_status))
             .route("/api/sim/{id}/raw", web::get().to(get_sim_raw))
+            .route("/api/sim/{id}/input", web::get().to(get_sim_input))
+            .route("/api/sim/{id}/html", web::get().to(get_sim_html))
+            .route("/api/sim/{id}/output.txt", web::get().to(get_sim_text_output))
+            .route("/api/sim/{id}/data.csv", web::get().to(get_sim_csv))
             .route("/api/item-info/{id}", web::get().to(get_item_info))
             .route("/api/item-info/batch", web::post().to(get_item_info_batch))
             .route("/api/enchant-info/{id}", web::get().to(get_enchant_info))

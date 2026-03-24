@@ -61,6 +61,23 @@ pub fn parse_simc_result(raw: &Value) -> Value {
         .and_then(|m| m.as_f64())
         .unwrap_or(0.0);
 
+    let statistics = sim.get("statistics").unwrap_or(&empty);
+    let total_iterations = collected
+        .get("dps")
+        .and_then(|d| d.get("count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let elapsed_time = statistics
+        .get("elapsed_time_seconds")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let target_error = sim
+        .get("options")
+        .and_then(|o| o.get("target_error"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let error_pct = if dps_mean > 0.0 { (dps_error / dps_mean) * 100.0 } else { 0.0 };
+
     let mut result = json!({
         "player_name": player.get("name").and_then(|n| n.as_str()).unwrap_or("Unknown"),
         "player_class": player.get("specialization")
@@ -69,7 +86,11 @@ pub fn parse_simc_result(raw: &Value) -> Value {
             .unwrap_or("Unknown"),
         "dps": round1(dps_mean),
         "dps_error": round1(dps_error),
+        "dps_error_pct": round2(error_pct),
         "fight_length": round1(fight_length),
+        "iterations": total_iterations,
+        "elapsed_time_seconds": round2(elapsed_time),
+        "target_error": target_error,
         "simc_version": extract_version(raw),
     });
 
@@ -94,11 +115,27 @@ pub fn parse_simc_result(raw: &Value) -> Value {
                 .unwrap_or("physical");
 
             if !name.is_empty() && dps_contribution > 0.0 {
-                abilities.push(json!({
+                let spell_id = stat.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let mut ability = json!({
                     "name": name,
                     "portion_dps": round1(dps_contribution),
                     "school": school,
-                }));
+                });
+                if spell_id > 0 {
+                    ability["spell_id"] = json!(spell_id);
+                }
+                // Check children for spell_id if parent has none (e.g. moonlight_chakram wrapper)
+                if spell_id == 0 {
+                    if let Some(children) = stat.get("children").and_then(|c| c.as_array()) {
+                        if let Some(child) = children.first() {
+                            let child_id = child.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                            if child_id > 0 {
+                                ability["spell_id"] = json!(child_id);
+                            }
+                        }
+                    }
+                }
+                abilities.push(ability);
             }
         }
         abilities.sort_by(|a, b| {
@@ -311,9 +348,36 @@ pub fn parse_top_gear_result(
     let all_gear = extract_all_gear(player);
     let equipped_gear: serde_json::Map<String, Value> = all_gear.into_iter().collect();
 
+    let statistics = sim.get("statistics").unwrap_or(&empty);
+    let total_iterations = collected
+        .get("dps")
+        .and_then(|d| d.get("count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let elapsed_time = statistics
+        .get("elapsed_time_seconds")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let target_error = sim
+        .get("options")
+        .and_then(|o| o.get("target_error"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let dps_error = collected
+        .get("dps")
+        .and_then(|d| d.get("mean_std_dev"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let error_pct = if base_dps > 0.0 { (dps_error / base_dps) * 100.0 } else { 0.0 };
+
     json!({
         "type": "top_gear",
         "base_dps": round1(base_dps),
+        "dps_error": round1(dps_error),
+        "dps_error_pct": round2(error_pct),
+        "iterations": total_iterations,
+        "elapsed_time_seconds": round2(elapsed_time),
+        "target_error": target_error,
         "player_name": player.get("name").and_then(|n| n.as_str()).unwrap_or("Unknown"),
         "player_class": player.get("specialization")
             .or_else(|| player.get("type"))
@@ -327,6 +391,10 @@ pub fn parse_top_gear_result(
 
 fn round1(v: f64) -> f64 {
     (v * 10.0).round() / 10.0
+}
+
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
 }
 
 fn round4(v: f64) -> f64 {

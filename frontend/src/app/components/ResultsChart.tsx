@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 interface Ability {
   name: string;
   portion_dps: number;
   school: string;
+  spell_id?: number;
 }
 
 interface ResultsChartProps {
@@ -13,6 +16,52 @@ interface ResultsChartProps {
   playerName: string;
   playerClass: string;
   abilities: Ability[];
+}
+
+const iconCache = new Map<number, string>();
+
+function useSpellIcons(spellIds: number[]) {
+  const [icons, setIcons] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    const missing = spellIds.filter((id) => id > 0 && !iconCache.has(id));
+    if (missing.length === 0) {
+      setIcons(new Map(iconCache));
+      return;
+    }
+
+    let cancelled = false;
+    Promise.all(
+      missing.map(async (id) => {
+        try {
+          const res = await fetch(
+            `https://nether.wowhead.com/tooltip/spell/${id}?dataEnv=1&locale=0`
+          );
+          if (!res.ok) return;
+          const data = await res.json();
+          if (data.icon) iconCache.set(id, data.icon);
+        } catch {
+          // ignore
+        }
+      })
+    ).then(() => {
+      if (!cancelled) setIcons(new Map(iconCache));
+    });
+
+    return () => { cancelled = true; };
+  }, [spellIds.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return icons;
+}
+
+function SpellIcon({ icon }: { icon: string }) {
+  return (
+    <img
+      src={`https://wow.zamimg.com/images/wow/icons/small/${icon}.jpg`}
+      alt=""
+      className="w-5 h-5 rounded-[3px] shrink-0"
+    />
+  );
 }
 
 const SCHOOL_COLORS: Record<string, string> = {
@@ -36,6 +85,8 @@ export default function ResultsChart({
   const totalDps = dps || abilities.reduce((s, a) => s + a.portion_dps, 0);
   const top = abilities.slice(0, 15);
   const maxDps = top.length > 0 ? top[0].portion_dps : 1;
+  const spellIds = top.map((a) => a.spell_id || 0);
+  const icons = useSpellIcons(spellIds);
 
   return (
     <div className="space-y-6">
@@ -78,7 +129,12 @@ export default function ResultsChart({
                   style={{ backgroundColor: color, opacity: 0.6 }}
                 />
                 {/* Content */}
-                <span className="relative pl-3 text-[12px] text-gray-300 truncate flex-1">
+                <span className="relative pl-3 text-[12px] text-gray-300 truncate flex-1 flex items-center gap-2">
+                  {a.spell_id && icons.get(a.spell_id) ? (
+                    <SpellIcon icon={icons.get(a.spell_id)!} />
+                  ) : (
+                    <span className="w-5 h-5 rounded-[3px] shrink-0 bg-surface-2" />
+                  )}
                   {name}
                 </span>
                 <span className="relative text-[11px] font-mono tabular-nums text-gray-500 w-16 text-right shrink-0">

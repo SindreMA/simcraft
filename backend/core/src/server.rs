@@ -125,6 +125,8 @@ pub struct TopGearRequest {
     pub max_upgrade: bool,
     #[serde(default)]
     pub copy_enchants: bool,
+    #[serde(default)]
+    pub max_combinations: Option<usize>,
     #[serde(flatten)]
     pub options: SimOptions,
 }
@@ -501,6 +503,7 @@ async fn create_top_gear_sim(
             &base_profile,
             &items_by_slot,
             &req.selected_items,
+            req.max_combinations,
         ) {
             Ok(r) => r,
             Err(e) => {

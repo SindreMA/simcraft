@@ -9,6 +9,8 @@ interface SimContextType {
   setFightStyle: (v: string) => void;
   threads: number;
   setThreads: (v: number) => void;
+  maxCombinations: number;
+  setMaxCombinations: (v: number) => void;
   selectedTalent: string;
   setSelectedTalent: (v: string) => void;
   targetCount: number;
@@ -38,18 +40,19 @@ export function useSimContext() {
   return ctx;
 }
 
-function readStoredThreads(): number {
-  if (typeof window === "undefined") return 0;
-  const v = localStorage.getItem("simhammer_threads");
-  if (v == null) return 0;
+function readStored(key: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  const v = localStorage.getItem(key);
+  if (v == null) return fallback;
   const n = parseInt(v, 10);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 export function SimProvider({ children }: { children: ReactNode }) {
   const [simcInput, setSimcInput] = useState("");
   const [fightStyle, setFightStyle] = useState("Patchwerk");
-  const [threads, _setThreads] = useState(readStoredThreads);
+  const [threads, _setThreads] = useState(() => readStored("simhammer_threads", 0));
+  const [maxCombinations, _setMaxCombinations] = useState(() => readStored("simhammer_max_combinations", 500));
   const [selectedTalent, setSelectedTalent] = useState("");
   const [targetCount, setTargetCount] = useState(1);
   const [fightLength, setFightLength] = useState(300);
@@ -65,9 +68,14 @@ export function SimProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem("simhammer_threads", String(v)); } catch {}
   }, []);
 
+  const setMaxCombinations = useCallback((v: number) => {
+    _setMaxCombinations(v);
+    try { localStorage.setItem("simhammer_max_combinations", String(v)); } catch {}
+  }, []);
+
   return (
     <SimContext.Provider
-      value={{ simcInput, setSimcInput, fightStyle, setFightStyle, threads, setThreads, selectedTalent, setSelectedTalent, targetCount, setTargetCount, fightLength, setFightLength, customApl, setCustomApl, simcHeader, setSimcHeader, simcBasePlayer, setSimcBasePlayer, simcRaidActors, setSimcRaidActors, simcPostCombos, setSimcPostCombos, simcFooter, setSimcFooter }}
+      value={{ simcInput, setSimcInput, fightStyle, setFightStyle, threads, setThreads, maxCombinations, setMaxCombinations, selectedTalent, setSelectedTalent, targetCount, setTargetCount, fightLength, setFightLength, customApl, setCustomApl, simcHeader, setSimcHeader, simcBasePlayer, setSimcBasePlayer, simcRaidActors, setSimcRaidActors, simcPostCombos, setSimcPostCombos, simcFooter, setSimcFooter }}
     >
       {children}
     </SimContext.Provider>

@@ -341,6 +341,16 @@ fn apply_talent_override(simc_input: &str, talents: &str) -> String {
     }
 }
 
+/// Extract server= (realm) from a simc input string and inject it into a parsed result.
+fn inject_realm(parsed: &mut Value, simc_input: &str) {
+    for line in simc_input.lines() {
+        if let Some(val) = line.trim().strip_prefix("server=") {
+            parsed["realm"] = json!(val);
+            break;
+        }
+    }
+}
+
 /// Spawn a staged (top-gear / droptimizer) simulation in a background task.
 fn spawn_staged_sim(
     store: Arc<dyn JobStorage>,
@@ -380,7 +390,8 @@ fn spawn_staged_sim(
                     .and_then(|v| v.get("_combo_metadata").cloned())
                     .and_then(|v| serde_json::from_value(v).ok());
 
-                let parsed = result_parser::parse_top_gear_result(&output.json, meta.as_ref());
+                let mut parsed = result_parser::parse_top_gear_result(&output.json, meta.as_ref());
+                inject_realm(&mut parsed, &simc_input);
                 let result_str = serde_json::to_string(&parsed).unwrap_or_default();
                 let raw_str = serde_json::to_string(&output.json).ok();
                 store.set_result(&job_id, result_str, raw_str);
@@ -430,7 +441,8 @@ async fn create_sim(
         store_clone.update_progress(&job_id_clone, 20, "Simulating", "");
         match simc_runner::run_simc(&simc, &job_id_clone, &simc_input, &options).await {
             Ok(output) => {
-                let parsed = result_parser::parse_simc_result(&output.json);
+                let mut parsed = result_parser::parse_simc_result(&output.json);
+                inject_realm(&mut parsed, &simc_input);
                 let result_str = serde_json::to_string(&parsed).unwrap_or_default();
                 let raw_str = serde_json::to_string(&output.json).ok();
                 store_clone.set_result(&job_id_clone, result_str, raw_str);
@@ -599,6 +611,34 @@ async fn create_droptimizer_sim(
         status: "pending".to_string(),
         created_at,
     })
+}
+
+#[derive(Debug, Deserialize)]
+struct ListSimsQuery {
+    #[serde(default)]
+    player: String,
+    #[serde(default)]
+    realm: String,
+}
+
+#[cfg(feature = "desktop")]
+async fn list_sims(
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    let summaries = store.list_recent(20, None, None);
+    HttpResponse::Ok().json(summaries)
+}
+
+#[cfg(not(feature = "desktop"))]
+async fn list_sims_filtered(
+    query: web::Query<ListSimsQuery>,
+    store: web::Data<Arc<dyn JobStorage>>,
+) -> HttpResponse {
+    if query.player.is_empty() || query.realm.is_empty() {
+        return HttpResponse::BadRequest().json(json!({"detail": "player and realm are required"}));
+    }
+    let summaries = store.list_recent(20, Some(&query.player), Some(&query.realm));
+    HttpResponse::Ok().json(summaries)
 }
 
 async fn get_sim_status(
@@ -1098,7 +1138,15 @@ pub async fn start_with_storage_bind(
             .route("/api/instances/{id}/drops", web::get().to(get_instance_drops))
             .route("/health", web::get().to(health_check));
         #[cfg(feature = "desktop")]
-        { app = app.route("/api/system-stats", web::get().to(system_stats)); }
+        {
+            app = app
+                .route("/api/sims", web::get().to(list_sims))
+                .route("/api/system-stats", web::get().to(system_stats));
+        }
+        #[cfg(not(feature = "desktop"))]
+        {
+            app = app.route("/api/sims", web::get().to(list_sims_filtered));
+        }
 
         // Serve static frontend files in production (not in dev mode)
         if let Some(ref dir) = frontend {

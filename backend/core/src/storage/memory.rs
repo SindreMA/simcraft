@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::models::{Job, JobStatus};
+use crate::models::{Job, JobStatus, JobSummary, extract_result_summary};
 use super::JobStorage;
 
 pub struct MemoryStorage {
@@ -18,11 +18,53 @@ impl MemoryStorage {
 
 impl JobStorage for MemoryStorage {
     fn insert(&self, job: Job) {
-        self.jobs.lock().unwrap().insert(job.id.clone(), job);
+        let mut jobs = self.jobs.lock().unwrap();
+        jobs.insert(job.id.clone(), job);
+        if jobs.len() > *super::MAX_JOBS {
+            let mut entries: Vec<(String, String)> = jobs.iter()
+                .map(|(id, j)| (id.clone(), j.created_at.clone()))
+                .collect();
+            entries.sort_by(|a, b| a.1.cmp(&b.1));
+            let to_remove = jobs.len() - *super::MAX_JOBS;
+            for (id, _) in entries.into_iter().take(to_remove) {
+                jobs.remove(&id);
+            }
+        }
     }
 
     fn get(&self, id: &str) -> Option<Job> {
         self.jobs.lock().unwrap().get(id).cloned()
+    }
+
+    fn list_recent(&self, limit: usize, player: Option<&str>, realm: Option<&str>) -> Vec<JobSummary> {
+        let jobs = self.jobs.lock().unwrap();
+        let mut entries: Vec<&Job> = jobs.values().collect();
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        let mut results: Vec<JobSummary> = Vec::new();
+        for j in entries {
+            if results.len() >= limit { break; }
+            let s = extract_result_summary(&j.result_json, &j.simc_input);
+            if let Some(p) = player {
+                if s.player_name.as_deref() != Some(p) { continue; }
+            }
+            if let Some(r) = realm {
+                if s.realm.as_deref() != Some(r) { continue; }
+            }
+            results.push(JobSummary {
+                id: j.id.clone(),
+                status: j.status.clone(),
+                sim_type: j.sim_type.clone(),
+                created_at: j.created_at.clone(),
+                fight_style: j.fight_style.clone(),
+                iterations: j.iterations,
+                error_message: j.error_message.clone(),
+                player_name: s.player_name,
+                player_class: s.player_class,
+                realm: s.realm,
+                dps: s.dps,
+            });
+        }
+        results
     }
 
     fn update_status(&self, id: &str, status: JobStatus) {

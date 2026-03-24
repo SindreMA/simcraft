@@ -3,6 +3,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use tempfile::TempDir;
+
+/// Output from a simc subprocess, including all generated report files.
+pub struct SimcOutput {
+    pub json: Value,
+    pub html_report: Option<String>,
+    pub text_output: Option<String>,
+}
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -111,9 +119,11 @@ async fn run_simc_subprocess(
     desired_targets: u32,
     max_time: u32,
     calculate_scale_factors: bool,
+    single_actor_batch: bool,
     stage_name: &str,
+    generate_html: bool,
     on_profileset_progress: impl Fn(usize, usize),
-) -> Result<Value, String> {
+) -> Result<SimcOutput, String> {
     let suffix = if stage_name.is_empty() {
         String::new()
     } else {
@@ -125,6 +135,7 @@ async fn run_simc_subprocess(
 
     let input_file = tmp_dir.path().join("input.simc");
     let output_file = tmp_dir.path().join("output.json");
+    let html_file = tmp_dir.path().join("report.html");
 
     std::fs::write(&input_file, simc_input)
         .map_err(|e| format!("Failed to write input file: {}", e))?;
@@ -154,7 +165,11 @@ async fn run_simc_subprocess(
     });
 
     cmd.arg(input_file.to_str().unwrap_or(""))
-        .arg(format!("json2={}", output_file.display()))
+        .arg(format!("json2={}", output_file.display()));
+    if generate_html {
+        cmd.arg(format!("html={}", html_file.display()));
+    }
+    cmd
         .arg(format!("iterations={}", iterations))
         .arg(format!("target_error={}", target_error))
         .arg(format!("threads={}", threads))
@@ -176,6 +191,12 @@ async fn run_simc_subprocess(
         }
     }
     for opt in SIM_OPTIONS {
+        if opt.starts_with("single_actor_batch=") {
+            if single_actor_batch {
+                cmd.arg(*opt);
+            }
+            continue;
+        }
         cmd.arg(*opt);
     }
     for opt in EXPANSION_OPTIONS {
@@ -281,8 +302,22 @@ async fn run_simc_subprocess(
     let json_text = std::fs::read_to_string(&output_file)
         .map_err(|e| format!("Failed to read output JSON: {}", e))?;
 
-    serde_json::from_str(&json_text)
-        .map_err(|e| format!("Failed to parse output JSON: {}", e))
+    let json: Value = serde_json::from_str(&json_text)
+        .map_err(|e| format!("Failed to parse output JSON: {}", e))?;
+
+    let html_report = if generate_html && html_file.exists() {
+        std::fs::read_to_string(&html_file).ok()
+    } else {
+        None
+    };
+
+    let text_output = if !stdout_bytes.is_empty() {
+        Some(String::from_utf8_lossy(&stdout_bytes).to_string())
+    } else {
+        None
+    };
+
+    Ok(SimcOutput { json, html_report, text_output })
 }
 
 fn get_profileset_results(raw: &Value) -> Vec<Value> {
@@ -340,7 +375,7 @@ pub async fn run_simc(
     job_id: &str,
     simc_input: &str,
     options: &Value,
-) -> Result<Value, String> {
+) -> Result<SimcOutput, String> {
     let fight_style = options
         .get("fight_style")
         .and_then(|v| v.as_str())
@@ -367,6 +402,11 @@ pub async fn run_simc(
         .and_then(|v| v.as_u64())
         .unwrap_or(300) as u32;
 
+    let single_actor_batch = options
+        .get("single_actor_batch")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     run_simc_subprocess(
         simc_path,
         job_id,
@@ -378,7 +418,9 @@ pub async fn run_simc(
         desired_targets,
         max_time,
         calculate_scale_factors,
+        single_actor_batch,
         "",
+        true, // generate HTML for quick sims
         |_, _| {}, // Quick sim has no profilesets to track
     )
     .await
@@ -393,7 +435,7 @@ pub async fn run_simc_staged(
     combo_count: usize,
     on_progress: impl Fn(u8, &str, &str),
     on_stage_complete: impl Fn(&str),
-) -> Result<Value, String> {
+) -> Result<SimcOutput, String> {
     let fight_style = options
         .get("fight_style")
         .and_then(|v| v.as_str())
@@ -411,6 +453,10 @@ pub async fn run_simc_staged(
         .get("max_time")
         .and_then(|v| v.as_u64())
         .unwrap_or(300) as u32;
+    let single_actor_batch = options
+        .get("single_actor_batch")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
     if combo_count < STAGED_THRESHOLD {
         on_progress(5, "Simulating", &format!("{} combos", combo_count));
@@ -429,7 +475,9 @@ pub async fn run_simc_staged(
             desired_targets,
             max_time,
             false,
+            single_actor_batch,
             "direct",
+            false, // skip HTML for profileset sims
             |current, total| {
                 // Map profileset progress to 5%–95%
                 let pct = 5 + ((current as f64 / total as f64) * 90.0) as u8;
@@ -445,7 +493,7 @@ pub async fn run_simc_staged(
 
     let mut current_input = simc_input.to_string();
     let mut remaining = combo_count;
-    let mut result: Option<Value> = None;
+    let mut result: Option<SimcOutput> = None;
 
     // Collect eliminated combos' results so they appear in the final output.
     // Key: combo name, Value: profileset result object from the stage where it was cut.
@@ -486,7 +534,9 @@ pub async fn run_simc_staged(
             desired_targets,
             max_time,
             false,
+            single_actor_batch,
             &stage.name.to_lowercase(),
+            false, // skip HTML for staged sims
             |current, total| {
                 let pct = range_start
                     + ((current as f64 / total as f64) * (range_end - range_start) as f64) as u8;
@@ -509,7 +559,7 @@ pub async fn run_simc_staged(
             break;
         }
 
-        let profilesets = get_profileset_results(result.as_ref().unwrap());
+        let profilesets = get_profileset_results(&result.as_ref().unwrap().json);
         if profilesets.is_empty() {
             on_stage_complete(&format!("{} · no results", stage.name));
             break;
@@ -562,8 +612,8 @@ pub async fn run_simc_staged(
 
     // Inject eliminated combos into the final result so all combos appear in output.
     if !eliminated.is_empty() {
-        if let Some(ref mut res) = result {
-            if let Some(results_arr) = res
+        if let Some(ref mut output) = result {
+            if let Some(results_arr) = output.json
                 .pointer_mut("/sim/profilesets/results")
                 .and_then(|v| v.as_array_mut())
             {

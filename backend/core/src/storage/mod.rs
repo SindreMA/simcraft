@@ -13,6 +13,7 @@ pub trait JobStorage: Send + Sync {
     fn update_status(&self, id: &str, status: JobStatus);
     fn update_progress(&self, id: &str, pct: u8, stage: &str, detail: &str);
     fn complete_stage(&self, id: &str, summary: &str);
-    fn set_result(&self, id: &str, result: String);
+    fn set_result(&self, id: &str, result: String, raw_json: Option<String>);
     fn set_error(&self, id: &str, error: String);
+    fn set_report_files(&self, id: &str, html: Option<String>, text: Option<String>);
 }

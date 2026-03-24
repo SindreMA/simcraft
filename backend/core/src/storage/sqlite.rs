@@ -32,6 +32,13 @@ impl SqliteStorage {
             );"
         ).expect("Failed to create jobs table");
 
+        // Migrate: add columns if missing
+        let _ = conn.execute_batch(
+            "ALTER TABLE jobs ADD COLUMN html_report TEXT;
+             ALTER TABLE jobs ADD COLUMN text_output TEXT;"
+        );
+        let _ = conn.execute_batch("ALTER TABLE jobs ADD COLUMN raw_json TEXT;");
+
         Self { conn: Mutex::new(conn) }
     }
 
@@ -74,6 +81,9 @@ impl SqliteStorage {
             fight_style: row.get(12)?,
             target_error: row.get(13)?,
             created_at: row.get(14)?,
+            raw_json: row.get(15).ok().flatten(),
+            html_report: row.get(16).ok().flatten(),
+            text_output: row.get(17).ok().flatten(),
         })
     }
 }
@@ -112,7 +122,7 @@ impl JobStorage for SqliteStorage {
         conn.query_row(
             "SELECT id, status, sim_type, simc_input, result_json, combo_metadata_json,
              error_message, progress_pct, progress_stage, progress_detail, stages_completed,
-             iterations, fight_style, target_error, created_at
+             iterations, fight_style, target_error, created_at, raw_json, html_report, text_output
              FROM jobs WHERE id = ?1",
             params![id],
             Self::row_to_job,
@@ -155,11 +165,11 @@ impl JobStorage for SqliteStorage {
         }
     }
 
-    fn set_result(&self, id: &str, result: String) {
+    fn set_result(&self, id: &str, result: String, raw_json: Option<String>) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE jobs SET result_json = ?1, status = 'done' WHERE id = ?2",
-            params![result, id],
+            "UPDATE jobs SET result_json = ?1, raw_json = ?2, status = 'done' WHERE id = ?3",
+            params![result, raw_json, id],
         ).ok();
     }
 
@@ -168,6 +178,14 @@ impl JobStorage for SqliteStorage {
         conn.execute(
             "UPDATE jobs SET error_message = ?1, status = 'failed' WHERE id = ?2",
             params![error, id],
+        ).ok();
+    }
+
+    fn set_report_files(&self, id: &str, html: Option<String>, text: Option<String>) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET html_report = ?1, text_output = ?2 WHERE id = ?3",
+            params![html, text, id],
         ).ok();
     }
 }

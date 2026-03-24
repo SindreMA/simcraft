@@ -45,9 +45,10 @@ impl JobStorage for MemoryStorage {
         }
     }
 
-    fn set_result(&self, id: &str, result: String) {
+    fn set_result(&self, id: &str, result: String, raw_json: Option<String>) {
         if let Some(job) = self.jobs.lock().unwrap().get_mut(id) {
             job.result_json = Some(result);
+            job.raw_json = raw_json;
             job.status = JobStatus::Done;
         }
     }
@@ -56,6 +57,13 @@ impl JobStorage for MemoryStorage {
         if let Some(job) = self.jobs.lock().unwrap().get_mut(id) {
             job.error_message = Some(error);
             job.status = JobStatus::Failed;
+        }
+    }
+
+    fn set_report_files(&self, id: &str, html: Option<String>, text: Option<String>) {
+        if let Some(job) = self.jobs.lock().unwrap().get_mut(id) {
+            job.html_report = html;
+            job.text_output = text;
         }
     }
 }

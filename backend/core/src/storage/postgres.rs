@@ -51,6 +51,13 @@ impl PostgresStorage {
             );"
         ).await.expect("Failed to create jobs table");
 
+        // Migrate: add columns if missing
+        let _ = client.batch_execute(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS html_report TEXT;
+             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS text_output TEXT;
+             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS raw_json TEXT;"
+        ).await;
+
         Self { client: Mutex::new(client), rt }
     }
 
@@ -108,6 +115,9 @@ impl PostgresStorage {
             fight_style: row.get(12),
             target_error: row.get(13),
             created_at: row.get(14),
+            raw_json: row.get(15),
+            html_report: row.get(16),
+            text_output: row.get(17),
         }
     }
 }
@@ -150,7 +160,7 @@ impl JobStorage for PostgresStorage {
                 client.query_opt(
                     "SELECT id, status, sim_type, simc_input, result_json, combo_metadata_json,
                      error_message, progress_pct, progress_stage, progress_detail, stages_completed,
-                     iterations, fight_style, target_error, created_at
+                     iterations, fight_style, target_error, created_at, raw_json, html_report, text_output
                      FROM jobs WHERE id = $1",
                     &[&id],
                 ).await.ok().flatten().map(|row| Self::row_to_job(&row))
@@ -202,12 +212,12 @@ impl JobStorage for PostgresStorage {
         });
     }
 
-    fn set_result(&self, id: &str, result: String) {
+    fn set_result(&self, id: &str, result: String, raw_json: Option<String>) {
         self.blocking(|client| {
             self.rt.block_on(async {
                 client.execute(
-                    "UPDATE jobs SET result_json = $1, status = 'done' WHERE id = $2",
-                    &[&result, &id],
+                    "UPDATE jobs SET result_json = $1, raw_json = $2, status = 'done' WHERE id = $3",
+                    &[&result, &raw_json, &id],
                 ).await.ok();
             });
         });
@@ -219,6 +229,17 @@ impl JobStorage for PostgresStorage {
                 client.execute(
                     "UPDATE jobs SET error_message = $1, status = 'failed' WHERE id = $2",
                     &[&error, &id],
+                ).await.ok();
+            });
+        });
+    }
+
+    fn set_report_files(&self, id: &str, html: Option<String>, text: Option<String>) {
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET html_report = $1, text_output = $2 WHERE id = $3",
+                    &[&html, &text, &id],
                 ).await.ok();
             });
         });

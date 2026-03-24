@@ -133,7 +133,7 @@ function detectSpec(simcInput: string): string | null {
 }
 
 export default function DropFinderPage() {
-  const { simcInput, fightStyle, threads, selectedTalent, targetCount, fightLength, customSimc } = useSimContext();
+  const { simcInput, fightStyle, threads, selectedTalent, targetCount, fightLength, customApl, simcHeader, simcBasePlayer, simcRaidActors, simcPostCombos, simcFooter } = useSimContext();
   const [instances, setInstances] = useState<Instance[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [drops, setDrops] = useState<Record<string, DropItem[]> | null>(null);
@@ -257,7 +257,12 @@ export default function DropFinderPage() {
           max_time: fightLength,
           threads,
           ...(selectedTalent ? { talents: selectedTalent } : {}),
-          ...(customSimc ? { custom_simc: customSimc } : {}),
+          ...(customApl ? { custom_apl: customApl } : {}),
+          ...(simcHeader ? { simc_header: simcHeader } : {}),
+          ...(simcBasePlayer ? { simc_base_player: simcBasePlayer } : {}),
+          ...(simcRaidActors ? { simc_raid_actors: simcRaidActors } : {}),
+          ...(simcPostCombos ? { simc_post_combos: simcPostCombos } : {}),
+          ...(simcFooter ? { simc_footer: simcFooter } : {}),
         }),
       });
       if (!res.ok) {

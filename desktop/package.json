@@ -55,7 +55,12 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
     },
     "linux": {
       "target": ["AppImage", "deb"]

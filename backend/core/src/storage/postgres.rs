@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use tokio_postgres::{Client, NoTls};
 
-use crate::models::{Job, JobStatus};
+use crate::models::{Job, JobStatus, JobSummary, extract_result_summary};
 use super::JobStorage;
 
 pub struct PostgresStorage {
@@ -50,6 +50,13 @@ impl PostgresStorage {
                 created_at TEXT NOT NULL
             );"
         ).await.expect("Failed to create jobs table");
+
+        // Migrate: add columns if missing
+        let _ = client.batch_execute(
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS html_report TEXT;
+             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS text_output TEXT;
+             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS raw_json TEXT;"
+        ).await;
 
         Self { client: Mutex::new(client), rt }
     }
@@ -108,6 +115,9 @@ impl PostgresStorage {
             fight_style: row.get(12),
             target_error: row.get(13),
             created_at: row.get(14),
+            raw_json: row.get(15),
+            html_report: row.get(16),
+            text_output: row.get(17),
         }
     }
 }
@@ -140,6 +150,12 @@ impl JobStorage for PostgresStorage {
                         &job.created_at,
                     ],
                 ).await.expect("Failed to insert job");
+
+                // Garbage collect oldest jobs beyond limit
+                client.execute(
+                    "DELETE FROM jobs WHERE id NOT IN (SELECT id FROM jobs ORDER BY created_at DESC LIMIT $1)",
+                    &[&(*super::MAX_JOBS as i64)],
+                ).await.ok();
             });
         });
     }
@@ -150,10 +166,57 @@ impl JobStorage for PostgresStorage {
                 client.query_opt(
                     "SELECT id, status, sim_type, simc_input, result_json, combo_metadata_json,
                      error_message, progress_pct, progress_stage, progress_detail, stages_completed,
-                     iterations, fight_style, target_error, created_at
+                     iterations, fight_style, target_error, created_at, raw_json, html_report, text_output
                      FROM jobs WHERE id = $1",
                     &[&id],
                 ).await.ok().flatten().map(|row| Self::row_to_job(&row))
+            })
+        })
+    }
+
+    fn list_recent(&self, limit: usize, player: Option<&str>, realm: Option<&str>) -> Vec<JobSummary> {
+        let player = player.map(String::from);
+        let realm = realm.map(String::from);
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                let fetch_limit = if player.is_some() || realm.is_some() { 200i64 } else { limit as i64 };
+                let rows = client.query(
+                    "SELECT id, status, sim_type, created_at, fight_style, iterations, error_message, result_json, simc_input
+                     FROM jobs ORDER BY created_at DESC LIMIT $1",
+                    &[&fetch_limit],
+                ).await.unwrap_or_default();
+                let all: Vec<JobSummary> = rows.iter().map(|row| {
+                    let status_str: String = row.get(1);
+                    let iterations: i32 = row.get(5);
+                    let result_json: Option<String> = row.get(7);
+                    let simc_input: String = row.get::<_, Option<String>>(8).unwrap_or_default();
+                    let s = extract_result_summary(&result_json, &simc_input);
+                    JobSummary {
+                        id: row.get(0),
+                        status: Self::str_to_status(&status_str),
+                        sim_type: row.get(2),
+                        created_at: row.get(3),
+                        fight_style: row.get(4),
+                        iterations: iterations as u32,
+                        error_message: row.get(6),
+                        player_name: s.player_name,
+                        player_class: s.player_class,
+                        realm: s.realm,
+                        dps: s.dps,
+                    }
+                }).collect();
+                if player.is_none() && realm.is_none() {
+                    return all;
+                }
+                all.into_iter().filter(|j| {
+                    if let Some(ref p) = player {
+                        if j.player_name.as_deref() != Some(p) { return false; }
+                    }
+                    if let Some(ref r) = realm {
+                        if j.realm.as_deref() != Some(r) { return false; }
+                    }
+                    true
+                }).take(limit).collect()
             })
         })
     }
@@ -202,12 +265,12 @@ impl JobStorage for PostgresStorage {
         });
     }
 
-    fn set_result(&self, id: &str, result: String) {
+    fn set_result(&self, id: &str, result: String, raw_json: Option<String>) {
         self.blocking(|client| {
             self.rt.block_on(async {
                 client.execute(
-                    "UPDATE jobs SET result_json = $1, status = 'done' WHERE id = $2",
-                    &[&result, &id],
+                    "UPDATE jobs SET result_json = $1, raw_json = $2, status = 'done' WHERE id = $3",
+                    &[&result, &raw_json, &id],
                 ).await.ok();
             });
         });
@@ -219,6 +282,17 @@ impl JobStorage for PostgresStorage {
                 client.execute(
                     "UPDATE jobs SET error_message = $1, status = 'failed' WHERE id = $2",
                     &[&error, &id],
+                ).await.ok();
+            });
+        });
+    }
+
+    fn set_report_files(&self, id: &str, html: Option<String>, text: Option<String>) {
+        self.blocking(|client| {
+            self.rt.block_on(async {
+                client.execute(
+                    "UPDATE jobs SET html_report = $1, text_output = $2 WHERE id = $3",
+                    &[&html, &text, &id],
                 ).await.ok();
             });
         });

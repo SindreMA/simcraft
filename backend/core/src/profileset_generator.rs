@@ -39,12 +39,15 @@ fn detect_class(base_profile: &str) -> Option<String> {
     None
 }
 
-pub fn max_combinations() -> usize {
-    std::env::var("MAX_COMBINATIONS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1500)
-}
+use once_cell::sync::Lazy;
+
+/// Maximum gear combinations for Top Gear. Override with MAX_COMBINATIONS env var.
+pub static MAX_COMBINATIONS: Lazy<usize> = Lazy::new(|| {
+    if let Ok(val) = std::env::var("MAX_COMBINATIONS") {
+        if let Ok(n) = val.parse() { return n; }
+    }
+    500
+});
 
 const UNIQUE_SLOT_PAIRS: &[(&str, &str)] = &[
     ("finger1", "finger2"),
@@ -59,6 +62,7 @@ pub fn generate_top_gear_input(
     base_profile: &str,
     items_by_slot: &HashMap<String, Vec<Value>>,
     selected_items: &HashMap<String, Vec<usize>>,
+    max_combos_override: Option<usize>,
 ) -> Result<(String, usize, HashMap<String, Vec<Value>>), String> {
     // Extract base profile info (non-gear lines) and equipped gear
     let (base_lines, equipped_gear, talents_string, _spec) = parse_base_profile(base_profile);
@@ -210,11 +214,11 @@ pub fn generate_top_gear_input(
     }
 
     let combo_count = valid_combos.len();
-    let max_combos = max_combinations();
-    if combo_count > max_combos {
+    let limit = max_combos_override.unwrap_or(*MAX_COMBINATIONS);
+    if combo_count > limit {
         return Err(format!(
             "Too many combinations ({}). Maximum is {}. Please deselect some items.",
-            combo_count, max_combos
+            combo_count, limit
         ));
     }
 

@@ -5,7 +5,7 @@ import { useSimContext } from "../components/SimContext";
 import { API_URL } from "../lib/api";
 
 export default function QuickSimPage() {
-  const { simcInput, fightStyle, threads, selectedTalent, targetCount, fightLength, customSimc } = useSimContext();
+  const { simcInput, fightStyle, threads, selectedTalent, targetCount, fightLength, customApl, simcHeader, simcBasePlayer, simcRaidActors, simcPostCombos, simcFooter } = useSimContext();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,7 +31,12 @@ export default function QuickSimPage() {
           max_time: fightLength,
           threads,
           ...(selectedTalent ? { talents: selectedTalent } : {}),
-          ...(customSimc ? { custom_simc: customSimc } : {}),
+          ...(customApl ? { custom_apl: customApl } : {}),
+          ...(simcHeader ? { simc_header: simcHeader } : {}),
+          ...(simcBasePlayer ? { simc_base_player: simcBasePlayer } : {}),
+          ...(simcRaidActors ? { simc_raid_actors: simcRaidActors } : {}),
+          ...(simcPostCombos ? { simc_post_combos: simcPostCombos } : {}),
+          ...(simcFooter ? { simc_footer: simcFooter } : {}),
         }),
       });
       if (!res.ok) {

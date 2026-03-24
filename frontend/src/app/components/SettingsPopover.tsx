@@ -11,7 +11,7 @@ const PRESETS = [
 ] as const;
 
 export default function SettingsPopover() {
-  const { threads, setThreads } = useSimContext();
+  const { threads, setThreads, maxCombinations, setMaxCombinations } = useSimContext();
   const [open, setOpen] = useState(false);
   const [maxThreads, setMaxThreads] = useState(0);
   const [isDesktop, setIsDesktop] = useState(false);
@@ -58,13 +58,10 @@ export default function SettingsPopover() {
         className="h-7 flex items-center gap-1.5 rounded-md px-2 text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="1" y="5" width="14" height="7" rx="1" />
-          <rect x="1" y="5" width={14 * (selectedIdx >= 0 ? PRESETS[selectedIdx].pct : 0.6)} height="7" rx="1" fill="currentColor" opacity="0.25" />
-          <path d="M4 1v4M8 1v4M12 1v4" />
+          <circle cx="8" cy="8" r="2" />
+          <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" />
         </svg>
-        <span className="text-[11px] font-medium">
-          {selectedIdx >= 0 ? PRESETS[selectedIdx].label : "Performance"}
-        </span>
+        <span className="text-[11px] font-medium">Settings</span>
       </button>
 
       {open && (
@@ -96,6 +93,25 @@ export default function SettingsPopover() {
                 </button>
               );
             })}
+          </div>
+
+          {/* Max Combinations */}
+          <div className="mt-4 pt-4 border-t border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-medium text-gray-300">Max Gear Combos</span>
+              <input
+                type="number"
+                min={10}
+                max={100000}
+                step={50}
+                value={maxCombinations}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10);
+                  if (Number.isFinite(n) && n > 0) setMaxCombinations(n);
+                }}
+                className="w-20 text-xs font-mono bg-surface-2 border border-border px-2 py-1 rounded text-white tabular-nums text-center focus:outline-none focus:border-gold/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </div>
           </div>
         </div>
       )}

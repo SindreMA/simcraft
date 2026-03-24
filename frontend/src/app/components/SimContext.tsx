@@ -15,8 +15,19 @@ interface SimContextType {
   setTargetCount: (v: number) => void;
   fightLength: number;
   setFightLength: (v: number) => void;
-  customSimc: string;
-  setCustomSimc: (v: string) => void;
+  customApl: string;
+  setCustomApl: (v: string) => void;
+  // Expert Mode injection points
+  simcHeader: string;
+  setSimcHeader: (v: string) => void;
+  simcBasePlayer: string;
+  setSimcBasePlayer: (v: string) => void;
+  simcRaidActors: string;
+  setSimcRaidActors: (v: string) => void;
+  simcPostCombos: string;
+  setSimcPostCombos: (v: string) => void;
+  simcFooter: string;
+  setSimcFooter: (v: string) => void;
 }
 
 const SimContext = createContext<SimContextType | null>(null);
@@ -42,7 +53,12 @@ export function SimProvider({ children }: { children: ReactNode }) {
   const [selectedTalent, setSelectedTalent] = useState("");
   const [targetCount, setTargetCount] = useState(1);
   const [fightLength, setFightLength] = useState(300);
-  const [customSimc, setCustomSimc] = useState("");
+  const [customApl, setCustomApl] = useState("");
+  const [simcHeader, setSimcHeader] = useState("");
+  const [simcBasePlayer, setSimcBasePlayer] = useState("");
+  const [simcRaidActors, setSimcRaidActors] = useState("");
+  const [simcPostCombos, setSimcPostCombos] = useState("");
+  const [simcFooter, setSimcFooter] = useState("");
 
   const setThreads = useCallback((v: number) => {
     _setThreads(v);
@@ -51,7 +67,7 @@ export function SimProvider({ children }: { children: ReactNode }) {
 
   return (
     <SimContext.Provider
-      value={{ simcInput, setSimcInput, fightStyle, setFightStyle, threads, setThreads, selectedTalent, setSelectedTalent, targetCount, setTargetCount, fightLength, setFightLength, customSimc, setCustomSimc }}
+      value={{ simcInput, setSimcInput, fightStyle, setFightStyle, threads, setThreads, selectedTalent, setSelectedTalent, targetCount, setTargetCount, fightLength, setFightLength, customApl, setCustomApl, simcHeader, setSimcHeader, simcBasePlayer, setSimcBasePlayer, simcRaidActors, setSimcRaidActors, simcPostCombos, setSimcPostCombos, simcFooter, setSimcFooter }}
     >
       {children}
     </SimContext.Provider>

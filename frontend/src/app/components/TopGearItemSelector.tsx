@@ -6,6 +6,7 @@ import { useItemInfo, useEnchantInfo, useGemInfo, getIconUrl, getWowheadUrl, get
 import type { ItemQuery, ItemInfo, EnchantInfo, GemInfo } from "../lib/useItemInfo";
 import { useWowheadTooltips } from "../lib/useWowheadTooltips";
 import { API_URL } from "../lib/api";
+import { useSimContext } from "./SimContext";
 
 interface UpgradeOption {
   bonus_id: number;
@@ -66,6 +67,7 @@ export default function TopGearItemSelector({
   maxUpgrade,
   maxArmorSubclass,
 }: TopGearItemSelectorProps) {
+  const { maxCombinations } = useSimContext();
   const [upgradeMenuFor, setUpgradeMenuFor] = useState<string | null>(null);
   const [upgradeOptions, setUpgradeOptions] = useState<UpgradeOption[]>([]);
   const [loadingUpgrades, setLoadingUpgrades] = useState(false);
@@ -329,7 +331,7 @@ export default function TopGearItemSelector({
         </p>
         <span
           className={`text-xs font-mono px-2.5 py-1 rounded-md ${
-            comboCount > 500
+            comboCount > maxCombinations
               ? "bg-red-500/10 text-red-400"
               : comboCount > 0
               ? "bg-surface-2 text-white"

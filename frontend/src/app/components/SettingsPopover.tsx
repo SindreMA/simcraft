@@ -97,23 +97,21 @@ export default function SettingsPopover() {
 
           {/* Max Combinations */}
           <div className="mt-4 pt-4 border-t border-border">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-gray-300">Max Gear Combos</span>
               <input
                 type="number"
                 min={10}
-                max={10000}
+                max={100000}
+                step={50}
                 value={maxCombinations}
                 onChange={(e) => {
                   const n = parseInt(e.target.value, 10);
                   if (Number.isFinite(n) && n > 0) setMaxCombinations(n);
                 }}
-                className="w-20 text-xs font-mono bg-surface-2 border border-border px-2 py-0.5 rounded text-white tabular-nums text-right"
+                className="w-20 text-xs font-mono bg-surface-2 border border-border px-2 py-1 rounded text-white tabular-nums text-center focus:outline-none focus:border-gold/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
-            <p className="text-[10px] text-gray-600">
-              Maximum gear combinations for Top Gear sims. Higher values take longer.
-            </p>
           </div>
         </div>
       )}
